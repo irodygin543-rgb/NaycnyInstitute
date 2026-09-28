@@ -792,7 +792,7 @@ public class MainActivity extends Activity {
 
     void info(String h, String t) {
         new AlertDialog.Builder(this).setTitle(h).setMessage(t).setPositiveButton("Понятно",null).show();
-        
+        {
 // --- НАЧАЛО КОДА ДЛЯ GEMINI ---
 void testGemini() {
     final EditText input = new EditText(this);
