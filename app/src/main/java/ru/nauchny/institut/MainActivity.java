@@ -794,7 +794,7 @@ public class MainActivity extends Activity {
         new AlertDialog.Builder(this).setTitle(h).setMessage(t).setPositiveButton("Понятно",null).show();
     }
 
-    // --- НАЧАЛО КОДА ДЛЯ GEMINI ---
+    // --- GEMINI (новый формат API 2025) ---
     void testGemini() {
         final EditText input = new EditText(this);
         input.setHint("Введите запрос для Gemini...");
@@ -824,16 +824,16 @@ public class MainActivity extends Activity {
     }
 
     String callGemini(String prompt) {
-        // ВАЖНО: вставь свой ключ между кавычками
-        String apiKey = "AQ.Ab8RN6JUmh33CkiFqZfn1lDnLCNB2ldid46r2oOerRabeje70g";
-        String model = "gemini-1.5-flash";
-        String urlString = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + apiKey;
+        String apiKey = "AQ.Ab8RN6Kz100A5YSHRgdgXgvHlx7hkAqwZqM_RJK2DUkEr4jz8A";
+        String model = "gemini-flash-latest";
+        String urlString = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent";
 
         try {
             java.net.URL url = new java.net.URL(urlString);
             java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Content-Type", "application/json");
+            conn.setRequestProperty("X-goog-api-key", apiKey);
             conn.setDoOutput(true);
 
             String safePrompt = prompt.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n");
@@ -882,5 +882,5 @@ public class MainActivity extends Activity {
             return "Ошибка сети: " + e.toString();
         }
     }
-    // --- КОНЕЦ КОДА ДЛЯ GEMINI ---
-}
+    // --- КОНЕЦ GEMINI ---
+                                                                                                             }
