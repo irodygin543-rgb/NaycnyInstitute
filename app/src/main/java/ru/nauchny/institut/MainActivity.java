@@ -154,6 +154,7 @@ public class MainActivity extends Activity {
         content.addView(nav("🌐 Источники и интернет-исследования ("+sources.size()+")", this::showSources));
         content.addView(nav("🔬 Web Research ("+researchJobs.size()+")", this::showResearch));
         content.addView(nav("🤖 AI-оркестратор ("+pipelineJobs.size()+")", this::showPipelines));
+        content.addView(nav("🧠 Gemini: тест", this::testGemini));
         content.addView(nav("🏆 Соревнования агентов ("+competitions.size()+")", this::showCompetitions));
         content.addView(nav("⚖ Нормативная база", () -> info("Нормативная база", "Отдельный обновляемый контур для законодательства, приказов и требований к научной и образовательной деятельности.")));
         content.addView(nav("🏆 Соревнования агентов", () -> info("Соревнования", "Агенты смогут решать одинаковые научные задачи, проходить слепое рецензирование и получать многомерные показатели.")));
