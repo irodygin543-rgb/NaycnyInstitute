@@ -824,7 +824,7 @@ void testGemini() {
 
 String callGemini(String prompt) {
     // ВАЖНО: вставь свой ключ между кавычками
-    String apiKey = "ВСТАВЬ_СЮДА_СВОЙ_КЛЮЧ";
+    String apiKey = "AQ.Ab8RN6JUmh33CkiFqZfn1lDnLCNB2ldid46r2oOerRabeje70g";
     String model = "gemini-1.5-flash";
     String urlString = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + apiKey;
 
