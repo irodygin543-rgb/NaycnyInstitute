@@ -792,5 +792,93 @@ public class MainActivity extends Activity {
 
     void info(String h, String t) {
         new AlertDialog.Builder(this).setTitle(h).setMessage(t).setPositiveButton("Понятно",null).show();
+        
+// --- НАЧАЛО КОДА ДЛЯ GEMINI ---
+void testGemini() {
+    final EditText input = new EditText(this);
+    input.setHint("Введите запрос для Gemini...");
+    new AlertDialog.Builder(this)
+        .setTitle("Тест Gemini API")
+        .setView(input)
+        .setPositiveButton("Отправить", (d, w) -> {
+            String prompt = input.getText().toString().trim();
+            if (prompt.isEmpty()) return;
+            ProgressDialog pd = new ProgressDialog(this);
+            pd.setMessage("Думаю...");
+            pd.show();
+            new Thread(() -> {
+                String result = callGemini(prompt);
+                runOnUiThread(() -> {
+                    pd.dismiss();
+                    new AlertDialog.Builder(this)
+                        .setTitle("Ответ Gemini")
+                        .setMessage(result)
+                        .setPositiveButton("OK", null)
+                        .show();
+                });
+            }).start();
+        })
+        .setNegativeButton("Отмена", null)
+        .show();
+}
+
+String callGemini(String prompt) {
+    // ВАЖНО: вставь свой ключ между кавычками
+    String apiKey = "ВСТАВЬ_СЮДА_СВОЙ_КЛЮЧ";
+    String model = "gemini-1.5-flash";
+    String urlString = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + apiKey;
+
+    try {
+        java.net.URL url = new java.net.URL(urlString);
+        java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("POST");
+        conn.setRequestProperty("Content-Type", "application/json");
+        conn.setDoOutput(true);
+
+        String safePrompt = prompt.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n");
+        String jsonInputString = "{\"contents\":[{\"parts\":[{\"text\":\"" + safePrompt + "\"}]}]}";
+
+        try (java.io.OutputStream os = conn.getOutputStream()) {
+            byte[] inputBytes = jsonInputString.getBytes("utf-8");
+            os.write(inputBytes, 0, inputBytes.length);
+        }
+
+        int responseCode = conn.getResponseCode();
+        if (responseCode != 200) {
+            java.io.InputStream err = conn.getErrorStream();
+            StringBuilder errBody = new StringBuilder();
+            if (err != null) {
+                java.io.BufferedReader er = new java.io.BufferedReader(new java.io.InputStreamReader(err, "utf-8"));
+                String line;
+                while ((line = er.readLine()) != null) errBody.append(line);
+            }
+            return "Ошибка HTTP " + responseCode + ":\n" + errBody.toString();
+        }
+
+        java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(conn.getInputStream(), "utf-8"));
+        StringBuilder response = new StringBuilder();
+        String responseLine;
+        while ((responseLine = br.readLine()) != null) response.append(responseLine);
+
+        String raw = response.toString();
+        int textIndex = raw.indexOf("\"text\":");
+        if (textIndex != -1) {
+            int start = raw.indexOf("\"", textIndex + 7) + 1;
+            int end = start;
+            while (end < raw.length()) {
+                char ch = raw.charAt(end);
+                if (ch == '\\') { end += 2; continue; }
+                if (ch == '"') break;
+                end++;
+            }
+            if (end > start) {
+                String result = raw.substring(start, end);
+                return result.replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\");
+            }
+        }
+        return raw;
+    } catch (Exception e) {
+        return "Ошибка сети: " + e.toString();
+    }
     }
 }
