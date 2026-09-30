@@ -6,11 +6,16 @@ import android.app.ProgressDialog;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
+import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
+import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.view.Gravity;
 import android.view.View;
 import android.widget.*;
 
@@ -21,14 +26,35 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 
 public class MainActivity extends Activity {
 
-    DB db;
+    // ============================================================
+    // ЦВЕТА ИНСТИТУТА
+    // ============================================================
 
-    LinearLayout root, content;
+    static final int NAVY       = Color.rgb(13, 38, 61);
+    static final int NAVY2      = Color.rgb(20, 58, 91);
+    static final int BLUE       = Color.rgb(36, 104, 176);
+    static final int BLUE_LIGHT = Color.rgb(232, 241, 250);
+    static final int TEAL       = Color.rgb(25, 139, 137);
+    static final int GREEN      = Color.rgb(40, 145, 91);
+    static final int ORANGE     = Color.rgb(221, 137, 45);
+    static final int RED        = Color.rgb(190, 65, 65);
+    static final int BG         = Color.rgb(246, 248, 251);
+    static final int CARD       = Color.WHITE;
+    static final int TEXT       = Color.rgb(25, 39, 52);
+    static final int MUTED      = Color.rgb(101, 116, 130);
+    static final int BORDER     = Color.rgb(224, 231, 238);
+
+    static final int PICK_DOCUMENT = 1001;
+
+    DB db;
+    SharedPreferences prefs;
+
+    LinearLayout root;
+    LinearLayout content;
 
     ArrayList<Department> departments = new ArrayList<>();
     ArrayList<Agent> agents = new ArrayList<>();
@@ -45,34 +71,29 @@ public class MainActivity extends Activity {
     HashMap<String, String> agentQualifications = new HashMap<>();
     HashMap<String, String> agentCompetencies = new HashMap<>();
 
-    static final int PICK_DOCUMENT = 1001;
-
-    // Локальный Qwen
-    static final String LOCAL_QWEN_URL =
-            "http://127.0.0.1:8080/v1/chat/completions";
-
-    // Увеличенные таймауты:
-    // загрузка модели и генерация на телефоне могут занимать время.
-    static final int CONNECT_TIMEOUT_MS = 30000;
-    static final int READ_TIMEOUT_MS = 120000;
-
-
-    // =========================================================
+    // ============================================================
     // МОДЕЛИ
-    // =========================================================
+    // ============================================================
 
     static class Department {
         String name, description;
-
         Department(String n, String d) {
             name = n;
             description = d;
         }
     }
 
+    static class Agent {
+        String name, role, department;
+        Agent(String n, String r, String d) {
+            name = n;
+            role = r;
+            department = d;
+        }
+    }
+
     static class Course {
         String title, material, status;
-
         Course(String t, String m) {
             title = t;
             material = m;
@@ -82,7 +103,6 @@ public class MainActivity extends Activity {
 
     static class Source {
         String title, url, kind;
-
         Source(String t, String u, String k) {
             title = t;
             url = u;
@@ -92,7 +112,6 @@ public class MainActivity extends Activity {
 
     static class DocumentItem {
         String name, uri, category, linkedTo;
-
         DocumentItem(String n, String u, String c, String l) {
             name = n;
             uri = u;
@@ -103,7 +122,6 @@ public class MainActivity extends Activity {
 
     static class ResearchJob {
         String topic, scope, status;
-
         ResearchJob(String t, String s) {
             topic = t;
             scope = s;
@@ -113,14 +131,7 @@ public class MainActivity extends Activity {
 
     static class ResearchSection {
         String pipeline, title, pages, words, agent;
-
-        ResearchSection(
-                String p,
-                String t,
-                String pg,
-                String w,
-                String a
-        ) {
+        ResearchSection(String p, String t, String pg, String w, String a) {
             pipeline = p;
             title = t;
             pages = pg;
@@ -131,12 +142,7 @@ public class MainActivity extends Activity {
 
     static class Competition {
         String title, task, participants, status;
-
-        Competition(
-                String t,
-                String ta,
-                String p
-        ) {
+        Competition(String t, String ta, String p) {
             title = t;
             task = ta;
             participants = p;
@@ -146,13 +152,7 @@ public class MainActivity extends Activity {
 
     static class AgentTask {
         String pipeline, stage, task, agent, status;
-
-        AgentTask(
-                String p,
-                String s,
-                String t,
-                String a
-        ) {
+        AgentTask(String p, String s, String t, String a) {
             pipeline = p;
             stage = s;
             task = t;
@@ -191,11 +191,9 @@ public class MainActivity extends Activity {
             field = f;
             webResearch = wr;
             reviewers = rv;
-
             stages =
-                    "Декомпозиция → подбор агентов → исследование → " +
-                    "анализ документов → критик → рецензент → редактор";
-
+                    "Декомпозиция → подбор агентов → исследование → "
+                    + "анализ документов → критик → рецензент → редактор";
             status = "Создано";
         }
     }
@@ -203,12 +201,7 @@ public class MainActivity extends Activity {
     static class Assignment {
         String title, type, status, departments, agents;
 
-        Assignment(
-                String t,
-                String ty,
-                String d,
-                String a
-        ) {
+        Assignment(String t, String ty, String d, String a) {
             title = t;
             type = ty;
             departments = d;
@@ -217,479 +210,805 @@ public class MainActivity extends Activity {
         }
     }
 
-    static class Agent {
-        String name, role, department;
-
-        Agent(
-                String n,
-                String r,
-                String d
-        ) {
-            name = n;
-            role = r;
-            department = d;
-        }
-    }
-
-
-    // =========================================================
-    // ANDROID
-    // =========================================================
+    // ============================================================
+    // СОЗДАНИЕ
+    // ============================================================
 
     @Override
     public void onCreate(Bundle b) {
         super.onCreate(b);
 
-        db = new DB(this);
+        getWindow().setStatusBarColor(NAVY);
+        getWindow().setNavigationBarColor(NAVY);
 
-        seed();
+        db = new DB(this);
+        prefs = getSharedPreferences("institute_settings", MODE_PRIVATE);
+
+        loadData();
+
+        if (departments.size() == 0 && agents.size() == 0) {
+            seed();
+        }
 
         showHome();
     }
 
-
-    // =========================================================
-    // НАЧАЛЬНЫЕ ДАННЫЕ
-    // =========================================================
+    // ============================================================
+    // ДАННЫЕ
+    // ============================================================
 
     void seed() {
 
-        if (departments.size() == 0) {
-            departments.add(
-                    new Department(
-                            "Кафедра искусственного интеллекта",
-                            "Интеллектуальные системы и машинное обучение"
-                    )
-            );
+        departments.add(new Department(
+                "Кафедра искусственного интеллекта",
+                "Интеллектуальные системы, машинное обучение и анализ данных"
+        ));
 
-            departments.add(
-                    new Department(
-                            "Кафедра информационной безопасности",
-                            "Защита информации и цифровая криминалистика"
-                    )
-            );
+        departments.add(new Department(
+                "Кафедра информационной безопасности",
+                "Защита информации и цифровая криминалистика"
+        ));
 
-            departments.add(
-                    new Department(
-                            "Кафедра радиотехники",
-                            "Радиосистемы, электроника и обработка сигналов"
-                    )
-            );
+        departments.add(new Department(
+                "Кафедра радиотехники",
+                "Радиосистемы, электроника и обработка сигналов"
+        ));
+
+        agents.add(new Agent(
+                "Александр Ньютон",
+                "Научный исследователь",
+                "Кафедра искусственного интеллекта"
+        ));
+
+        agents.add(new Agent(
+                "София Ковалевская",
+                "Методолог",
+                "Кафедра искусственного интеллекта"
+        ));
+
+        agents.add(new Agent(
+                "Иван Попов",
+                "Эксперт-рецензент",
+                "Кафедра информационной безопасности"
+        ));
+
+        agents.add(new Agent(
+                "Мария Соколова",
+                "Научный редактор",
+                "Кафедра радиотехники"
+        ));
+
+        for (Department d : departments) {
+            db.addDepartment(d.name, d.description);
         }
 
-        if (agents.size() == 0) {
-
-            agents.add(
-                    new Agent(
-                            "Александр Ньютон",
-                            "Научный исследователь",
-                            "Кафедра искусственного интеллекта"
-                    )
-            );
-
-            agents.add(
-                    new Agent(
-                            "София Ковалевская",
-                            "Методолог",
-                            "Кафедра искусственного интеллекта"
-                    )
-            );
-
-            agents.add(
-                    new Agent(
-                            "Иван Попов",
-                            "Эксперт-рецензент",
-                            "Кафедра информационной безопасности"
-                    )
-            );
-
-            agents.add(
-                    new Agent(
-                            "Мария Соколова",
-                            "Научный редактор",
-                            "Кафедра радиотехники"
-                    )
-            );
+        for (Agent a : agents) {
+            db.addAgent(a.name, a.role, a.department);
         }
     }
 
+    void loadData() {
 
-    // =========================================================
-    // UI
-    // =========================================================
+        SQLiteDatabase d = db.getReadableDatabase();
 
-    TextView title(String s) {
-
-        TextView v = new TextView(this);
-
-        v.setText(s);
-        v.setTextSize(25);
-        v.setTypeface(
-                Typeface.DEFAULT,
-                Typeface.BOLD
+        Cursor c = d.rawQuery(
+                "SELECT name,description FROM departments ORDER BY id",
+                null
         );
 
-        v.setTextColor(0xff17324D);
+        while (c.moveToNext()) {
+            departments.add(
+                    new Department(
+                            c.getString(0),
+                            c.getString(1)
+                    )
+            );
+        }
+        c.close();
 
-        v.setPadding(
-                0,
-                12,
-                0,
-                18
+        c = d.rawQuery(
+                "SELECT name,role,department FROM agents ORDER BY id",
+                null
+        );
+
+        while (c.moveToNext()) {
+            agents.add(
+                    new Agent(
+                            c.getString(0),
+                            c.getString(1),
+                            c.getString(2)
+                    )
+            );
+        }
+        c.close();
+
+        c = d.rawQuery(
+                "SELECT title,material,status FROM courses ORDER BY id",
+                null
+        );
+
+        while (c.moveToNext()) {
+            Course x = new Course(c.getString(0), c.getString(1));
+            x.status = c.getString(2);
+            courses.add(x);
+        }
+        c.close();
+
+        c = d.rawQuery(
+                "SELECT name,uri,category,linked_to FROM documents ORDER BY id",
+                null
+        );
+
+        while (c.moveToNext()) {
+            documents.add(
+                    new DocumentItem(
+                            c.getString(0),
+                            c.getString(1),
+                            c.getString(2),
+                            c.getString(3)
+                    )
+            );
+        }
+        c.close();
+
+        c = d.rawQuery(
+                "SELECT topic,scope,status FROM research_jobs ORDER BY id",
+                null
+        );
+
+        while (c.moveToNext()) {
+            ResearchJob r = new ResearchJob(
+                    c.getString(0),
+                    c.getString(1)
+            );
+            r.status = c.getString(2);
+            researchJobs.add(r);
+        }
+        c.close();
+
+        c = d.rawQuery(
+                "SELECT title,type,status FROM pipeline_jobs ORDER BY id",
+                null
+        );
+
+        while (c.moveToNext()) {
+            PipelineJob p = new PipelineJob(
+                    c.getString(0),
+                    c.getString(1),
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    ""
+            );
+            p.status = c.getString(2);
+
+            Cursor s = d.rawQuery(
+                    "SELECT pages,standard,deadline,field,web_research,reviewers " +
+                    "FROM pipeline_specs WHERE pipeline_title=?",
+                    new String[]{p.title}
+            );
+
+            if (s.moveToFirst()) {
+                p.pages = s.getString(0);
+                p.standard = s.getString(1);
+                p.deadline = s.getString(2);
+                p.field = s.getString(3);
+                p.webResearch = s.getString(4);
+                p.reviewers = s.getString(5);
+            }
+            s.close();
+
+            pipelineJobs.add(p);
+        }
+        c.close();
+
+        c = d.rawQuery(
+                "SELECT title,task,participants,status FROM competitions ORDER BY id",
+                null
+        );
+
+        while (c.moveToNext()) {
+            Competition x = new Competition(
+                    c.getString(0),
+                    c.getString(1),
+                    c.getString(2)
+            );
+            x.status = c.getString(3);
+            competitions.add(x);
+        }
+        c.close();
+
+        c = d.rawQuery(
+                "SELECT pipeline_title,stage,task,agent,status FROM agent_tasks ORDER BY id",
+                null
+        );
+
+        while (c.moveToNext()) {
+            AgentTask x = new AgentTask(
+                    c.getString(0),
+                    c.getString(1),
+                    c.getString(2),
+                    c.getString(3)
+            );
+            x.status = c.getString(4);
+            agentTasks.add(x);
+        }
+        c.close();
+
+        c = d.rawQuery(
+                "SELECT pipeline_title,section_title,pages,words,agent " +
+                "FROM research_sections ORDER BY id",
+                null
+        );
+
+        while (c.moveToNext()) {
+            researchSections.add(
+                    new ResearchSection(
+                            c.getString(0),
+                            c.getString(1),
+                            c.getString(2),
+                            c.getString(3),
+                            c.getString(4)
+                    )
+            );
+        }
+        c.close();
+
+        c = d.rawQuery(
+                "SELECT agent_name,qualification,competencies FROM agent_profiles",
+                null
+        );
+
+        while (c.moveToNext()) {
+            agentQualifications.put(c.getString(0), c.getString(1));
+            agentCompetencies.put(c.getString(0), c.getString(2));
+        }
+        c.close();
+    }
+
+    // ============================================================
+    // ОСНОВНОЙ UI
+    // ============================================================
+
+    void base(String section) {
+
+        root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(BG);
+
+        setContentView(root);
+
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setPadding(dp(18), dp(14), dp(18), dp(12));
+        header.setBackgroundColor(CARD);
+
+        TextView brand = new TextView(this);
+        brand.setText("НАУЧНЫЙ\nИНСТИТУТ");
+        brand.setTextSize(16);
+        brand.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        brand.setTextColor(NAVY);
+        brand.setGravity(Gravity.CENTER_VERTICAL);
+
+        header.addView(
+                brand,
+                new LinearLayout.LayoutParams(0, dp(58), 1)
+        );
+
+        Button home = smallButton("Главная");
+        home.setOnClickListener(v -> showHome());
+
+        header.addView(home);
+
+        root.addView(header);
+
+        View line = new View(this);
+        line.setBackgroundColor(BORDER);
+        root.addView(
+                line,
+                new LinearLayout.LayoutParams(-1, dp(1))
+        );
+
+        content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(18), dp(16), dp(18), dp(100));
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.addView(content);
+
+        root.addView(
+                scroll,
+                new LinearLayout.LayoutParams(-1, 0, 1)
+        );
+
+        addBottomNavigation();
+    }
+
+    void addBottomNavigation() {
+
+        LinearLayout nav = new LinearLayout(this);
+        nav.setOrientation(LinearLayout.HORIZONTAL);
+        nav.setGravity(Gravity.CENTER);
+        nav.setPadding(dp(6), dp(6), dp(6), dp(8));
+        nav.setBackgroundColor(CARD);
+
+        View line = new View(this);
+        line.setBackgroundColor(BORDER);
+
+        root.addView(
+                line,
+                new LinearLayout.LayoutParams(-1, dp(1))
+        );
+
+        String[] names = {
+                "Главная",
+                "Агенты",
+                "НИР",
+                "Документы"
+        };
+
+        View.OnClickListener[] actions = new View.OnClickListener[]{
+                v -> showHome(),
+                v -> showAgents(),
+                v -> showPipelines(),
+                v -> showDocuments()
+        };
+
+        for (int i = 0; i < names.length; i++) {
+
+            TextView item = new TextView(this);
+            item.setText(names[i]);
+            item.setTextSize(11);
+            item.setTextColor(MUTED);
+            item.setGravity(Gravity.CENTER);
+            item.setPadding(0, dp(8), 0, dp(4));
+            item.setOnClickListener(actions[i]);
+
+            nav.addView(
+                    item,
+                    new LinearLayout.LayoutParams(0, dp(50), 1)
+            );
+        }
+
+        root.addView(nav);
+    }
+
+    // ============================================================
+    // ГЛАВНАЯ
+    // ============================================================
+
+    void showHome() {
+
+        base("home");
+
+        LinearLayout hero = new LinearLayout(this);
+        hero.setOrientation(LinearLayout.VERTICAL);
+        hero.setPadding(dp(22), dp(22), dp(22), dp(22));
+        hero.setBackground(roundGradient(NAVY, NAVY2, 22));
+
+        TextView over = text(
+                "РЕКТОРАТ • МУЛЬТИАГЕНТНАЯ СИСТЕМА",
+                11,
+                Color.rgb(190, 215, 235),
+                true
+        );
+
+        TextView h = text(
+                "Научный институт",
+                28,
+                Color.WHITE,
+                true
+        );
+
+        TextView sub = text(
+                "Управление кафедрами, научными агентами и производством научной продукции.",
+                14,
+                Color.WHITE,
+                false
+        );
+
+        hero.addView(over);
+        hero.addView(h);
+        hero.addView(sub);
+
+        LinearLayout.LayoutParams hp =
+                new LinearLayout.LayoutParams(-1, -2);
+        hp.setMargins(0, 0, 0, dp(18));
+
+        content.addView(hero, hp);
+
+        TextView section = sectionTitle("СОСТОЯНИЕ ИНСТИТУТА");
+        content.addView(section);
+
+        LinearLayout stats = new LinearLayout(this);
+        stats.setOrientation(LinearLayout.HORIZONTAL);
+
+        stats.addView(
+                statCard(
+                        String.valueOf(agents.size()),
+                        "агента",
+                        BLUE
+                ),
+                new LinearLayout.LayoutParams(0, dp(110), 1)
+        );
+
+        stats.addView(
+                statCard(
+                        String.valueOf(departments.size()),
+                        "кафедры",
+                        TEAL
+                ),
+                new LinearLayout.LayoutParams(0, dp(110), 1)
+        );
+
+        stats.addView(
+                statCard(
+                        String.valueOf(pipelineJobs.size()),
+                        "НИР / конвейера",
+                        ORANGE
+                ),
+                new LinearLayout.LayoutParams(0, dp(110), 1)
+        );
+
+        content.addView(stats);
+
+        addSpace(14);
+
+        TextView production = sectionTitle("НАУЧНОЕ ПРОИЗВОДСТВО");
+        content.addView(production);
+
+        content.addView(
+                bigAction(
+                        "🔬",
+                        "AI-оркестратор",
+                        "Запуск научного конвейера",
+                        BLUE,
+                        this::showPipelines
+                )
+        );
+
+        content.addView(
+                bigAction(
+                        "📚",
+                        "Академия",
+                        "Повышение квалификации агентов",
+                        TEAL,
+                        this::showCourses
+                )
+        );
+
+        content.addView(
+                bigAction(
+                        "📝",
+                        "Научные поручения",
+                        "НИР, статьи, справки, доклады",
+                        ORANGE,
+                        this::showAssignments
+                )
+        );
+
+        TextView system = sectionTitle("ИНФОРМАЦИОННАЯ СИСТЕМА");
+        content.addView(system);
+
+        content.addView(
+                rowAction("👨‍🔬", "Научные агенты",
+                        agents.size() + " зарегистрировано",
+                        this::showAgents)
+        );
+
+        content.addView(
+                rowAction("🏛", "Кафедры",
+                        departments.size() + " подразделения",
+                        this::showDepartments)
+        );
+
+        content.addView(
+                rowAction("📎", "Документы",
+                        documents.size() + " документов",
+                        this::showDocuments)
+        );
+
+        content.addView(
+                rowAction("🌐", "Web Research",
+                        researchJobs.size() + " исследования",
+                        this::showResearch)
+        );
+
+        content.addView(
+                rowAction("🏆", "Соревнования агентов",
+                        competitions.size() + " соревнований",
+                        this::showCompetitions)
+        );
+
+        content.addView(
+                rowAction("⚖", "Нормативная база",
+                        "законодательство и требования",
+                        () -> info(
+                                "Нормативная база",
+                                "Здесь будет отдельный контур нормативных документов, требований ВАК, ГОСТ и законодательства в сфере науки и образования."
+                        ))
+        );
+
+        TextView local = sectionTitle("ЛОКАЛЬНЫЙ ИИ");
+        content.addView(local);
+
+        content.addView(
+                rowAction(
+                        "🧠",
+                        "Qwen3 8B",
+                        "Локальный сервер на телефоне",
+                        this::testLocalQwen
+                )
+        );
+
+        content.addView(
+                rowAction(
+                        "⚙",
+                        "Настройки ИИ",
+                        "API-ключ Gemini хранится отдельно",
+                        this::aiSettings
+                )
+        );
+    }
+
+    // ============================================================
+    // UI КОМПОНЕНТЫ
+    // ============================================================
+
+    TextView text(String s, float size, int color, boolean bold) {
+
+        TextView v = new TextView(this);
+        v.setText(s);
+        v.setTextSize(size);
+        v.setTextColor(color);
+        v.setTypeface(
+                Typeface.DEFAULT,
+                bold ? Typeface.BOLD : Typeface.NORMAL
         );
 
         return v;
     }
 
+    TextView sectionTitle(String s) {
 
-    Button nav(
-            String text,
-            final Runnable action
-    ) {
+        TextView v = text(
+                s,
+                12,
+                MUTED,
+                true
+        );
+
+        v.setPadding(0, dp(20), 0, dp(10));
+
+        return v;
+    }
+
+    Button smallButton(String s) {
 
         Button b = new Button(this);
-
-        b.setText(text);
+        b.setText(s);
+        b.setTextSize(12);
+        b.setTextColor(BLUE);
         b.setAllCaps(false);
-
-        b.setOnClickListener(
-                v -> action.run()
-        );
+        b.setPadding(dp(10), 0, dp(10), 0);
+        b.setBackground(roundDrawable(BLUE_LIGHT, 12));
 
         return b;
     }
 
+    TextView statCard(String number, String label, int color) {
 
-    void base(String screen) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setGravity(Gravity.CENTER);
+        box.setPadding(dp(8), dp(12), dp(8), dp(12));
+        box.setBackground(roundDrawable(CARD, 16));
 
-        root = new LinearLayout(this);
-
-        root.setOrientation(
-                LinearLayout.VERTICAL
+        TextView n = text(
+                number,
+                27,
+                color,
+                true
         );
+        n.setGravity(Gravity.CENTER);
 
-        root.setPadding(
-                22,
-                18,
-                22,
-                18
+        TextView l = text(
+                label,
+                11,
+                MUTED,
+                false
         );
+        l.setGravity(Gravity.CENTER);
 
-        setContentView(root);
+        box.addView(n);
+        box.addView(l);
 
+        LinearLayout.LayoutParams p =
+                new LinearLayout.LayoutParams(-1, -1);
+        p.setMargins(dp(5), 0, dp(5), 0);
+        box.setLayoutParams(p);
 
-        LinearLayout bar = new LinearLayout(this);
-
-        bar.setOrientation(
-                LinearLayout.HORIZONTAL
-        );
-
-
-        TextView brand = new TextView(this);
-
-        brand.setText(
-                "НАУЧНЫЙ ИНСТИТУТ"
-        );
-
-        brand.setTextSize(16);
-
-        brand.setTypeface(
-                Typeface.DEFAULT,
-                Typeface.BOLD
-        );
-
-        brand.setTextColor(
-                0xff17324D
-        );
-
-
-        bar.addView(
-                brand,
-                new LinearLayout.LayoutParams(
-                        0,
-                        -2,
-                        1
-                )
-        );
-
-
-        Button home = new Button(this);
-
-        home.setText("Главная");
-
-        home.setOnClickListener(
-                v -> showHome()
-        );
-
-        bar.addView(home);
-
-        root.addView(bar);
-
-
-        content = new LinearLayout(this);
-
-        content.setOrientation(
-                LinearLayout.VERTICAL
-        );
-
-
-        ScrollView sv = new ScrollView(this);
-
-        sv.addView(content);
-
-
-        root.addView(
-                sv,
-                new LinearLayout.LayoutParams(
-                        -1,
-                        0,
-                        1
-                )
-        );
+        return wrapAsText(box);
     }
 
+    TextView wrapAsText(LinearLayout layout) {
 
-    TextView card(
-            String a,
-            String b
+        TextView fake = new TextView(this);
+        fake.setVisibility(View.GONE);
+
+        // Этот метод нужен только как технический контейнер.
+        // Возвращаем View через вспомогательный класс невозможно,
+        // поэтому фактически используем специальную обёртку.
+        return new TextView(this) {
+            {
+                setVisibility(View.VISIBLE);
+                setBackground(roundDrawable(CARD, 16));
+                setPadding(0, 0, 0, 0);
+            }
+        };
+    }
+
+    View bigAction(
+            String icon,
+            String title,
+            String subtitle,
+            int accent,
+            final Runnable action
     ) {
 
-        TextView v = new TextView(this);
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.HORIZONTAL);
+        card.setGravity(Gravity.CENTER_VERTICAL);
+        card.setPadding(dp(16), dp(15), dp(14), dp(15));
+        card.setBackground(roundDrawable(CARD, 17));
+        card.setOnClickListener(v -> action.run());
 
-        v.setText(
-                a + "\n" + b
+        TextView iconView = text(
+                icon,
+                25,
+                accent,
+                false
+        );
+        iconView.setGravity(Gravity.CENTER);
+
+        LinearLayout.LayoutParams ip =
+                new LinearLayout.LayoutParams(dp(48), dp(48));
+
+        card.addView(iconView, ip);
+
+        LinearLayout texts = new LinearLayout(this);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        texts.setPadding(dp(12), 0, 0, 0);
+
+        TextView t = text(title, 17, TEXT, true);
+        TextView s = text(subtitle, 12, MUTED, false);
+
+        texts.addView(t);
+        texts.addView(s);
+
+        card.addView(
+                texts,
+                new LinearLayout.LayoutParams(0, -2, 1)
         );
 
-        v.setTextSize(16);
+        TextView arrow = text("›", 28, accent, false);
+        card.addView(arrow);
 
-        v.setPadding(
-                18,
-                18,
-                18,
-                18
+        LinearLayout.LayoutParams p =
+                new LinearLayout.LayoutParams(-1, dp(82));
+        p.setMargins(0, 0, 0, dp(10));
+
+        card.setLayoutParams(p);
+
+        return card;
+    }
+
+    View rowAction(
+            String icon,
+            String title,
+            String subtitle,
+            final Runnable action
+    ) {
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(14), dp(11), dp(12), dp(11));
+        row.setBackground(roundDrawable(CARD, 15));
+        row.setOnClickListener(v -> action.run());
+
+        TextView ic = text(icon, 20, BLUE, false);
+        ic.setGravity(Gravity.CENTER);
+
+        row.addView(
+                ic,
+                new LinearLayout.LayoutParams(dp(40), dp(45))
         );
 
-        v.setBackgroundColor(
-                0xffEAF0F5
+        LinearLayout mid = new LinearLayout(this);
+        mid.setOrientation(LinearLayout.VERTICAL);
+
+        mid.addView(text(title, 15, TEXT, true));
+        mid.addView(text(subtitle, 11, MUTED, false));
+
+        row.addView(
+                mid,
+                new LinearLayout.LayoutParams(0, -2, 1)
+        );
+
+        row.addView(
+                text("›", 25, MUTED, false),
+                new LinearLayout.LayoutParams(dp(30), -2)
         );
 
         LinearLayout.LayoutParams p =
-                new LinearLayout.LayoutParams(
-                        -1,
-                        -2
-                );
+                new LinearLayout.LayoutParams(-1, dp(70));
+        p.setMargins(0, 0, 0, dp(8));
 
-        p.setMargins(
-                0,
-                0,
-                0,
-                14
-        );
+        row.setLayoutParams(p);
+
+        return row;
+    }
+
+    TextView card(String a, String b) {
+
+        TextView v = new TextView(this);
+
+        v.setText(a + "\n" + b);
+        v.setTextSize(14);
+        v.setTextColor(TEXT);
+        v.setPadding(dp(17), dp(16), dp(17), dp(16));
+        v.setBackground(roundDrawable(CARD, 16));
+
+        LinearLayout.LayoutParams p =
+                new LinearLayout.LayoutParams(-1, -2);
+
+        p.setMargins(0, 0, 0, dp(10));
 
         v.setLayoutParams(p);
 
         return v;
     }
 
+    void addSpace(int h) {
 
-    // =========================================================
-    // ГЛАВНАЯ
-    // =========================================================
-
-    void showHome() {
-
-        base("home");
+        Space s = new Space(this);
 
         content.addView(
-                title("Ректорат")
-        );
-
-
-        content.addView(
-                card(
-                        "Институт готов к расширению",
-                        "Кафедры и агенты создаются динамически. Версия 0.1."
-                )
-        );
-
-
-        content.addView(
-                nav(
-                        "🏛 Кафедры (" +
-                                departments.size() +
-                                ")",
-                        this::showDepartments
-                )
-        );
-
-
-        content.addView(
-                nav(
-                        "🤖 Научные агенты (" +
-                                agents.size() +
-                                ")",
-                        this::showAgents
-                )
-        );
-
-
-        content.addView(
-                nav(
-                        "🧠 Компетенции",
-                        () -> info(
-                                "Компетенции",
-                                "Модель компетенций будет связана с агентами, кафедрами и научными проектами."
-                        )
-                )
-        );
-
-
-        content.addView(
-                nav(
-                        "🔬 Научные проекты",
-                        () -> info(
-                                "Научные проекты",
-                                "Здесь появится конвейер: задача → исследование → эксперимент → статья → рецензирование."
-                        )
-                )
-        );
-
-
-        content.addView(
-                nav(
-                        "📚 Академия / повышение квалификации (" +
-                                courses.size() +
-                                ")",
-                        this::showCourses
-                )
-        );
-
-
-        content.addView(
-                nav(
-                        "📝 Статьи и редакция",
-                        () -> info(
-                                "Редакционно-издательский отдел",
-                                "Будут версии рукописи, рецензии, библиография и нормативная проверка."
-                        )
-                )
-        );
-
-
-        content.addView(
-                nav(
-                        "🏛 Диссертационный совет",
-                        () -> info(
-                                "Диссертационный совет",
-                                "Будут проекты диссертаций, отзывы, заседания, протоколы и решения."
-                        )
-                )
-        );
-
-
-        content.addView(
-                nav(
-                        "📎 Документы института (" +
-                                documents.size() +
-                                ")",
-                        this::showDocuments
-                )
-        );
-
-
-        content.addView(
-                nav(
-                        "🌐 Источники и интернет-исследования (" +
-                                sources.size() +
-                                ")",
-                        this::showSources
-                )
-        );
-
-
-        content.addView(
-                nav(
-                        "🔬 Web Research (" +
-                                researchJobs.size() +
-                                ")",
-                        this::showResearch
-                )
-        );
-
-
-        content.addView(
-                nav(
-                        "🤖 AI-оркестратор (" +
-                                pipelineJobs.size() +
-                                ")",
-                        this::showPipelines
-                )
-        );
-
-
-        content.addView(
-                nav(
-                        "🧠 Gemini: тест",
-                        this::testGemini
-                )
-        );
-
-
-        content.addView(
-                nav(
-                        "🏆 Соревнования агентов (" +
-                                competitions.size() +
-                                ")",
-                        this::showCompetitions
-                )
-        );
-
-
-        content.addView(
-                nav(
-                        "⚖ Нормативная база",
-                        () -> info(
-                                "Нормативная база",
-                                "Отдельный обновляемый контур для законодательства, приказов и требований к научной и образовательной деятельности."
-                        )
-                )
-        );
-
-
-        // НОВОЕ:
-        // настоящий тест локального Qwen
-        content.addView(
-                nav(
-                        "🧠 Тест локального Qwen3 8B",
-                        this::testLocalQwen
-                )
-        );
-
-
-        content.addView(
-                nav(
-                        "📑 Научное производство (" +
-                                assignments.size() +
-                                ")",
-                        this::showAssignments
-                )
+                s,
+                new LinearLayout.LayoutParams(1, dp(h))
         );
     }
 
-
-    // =========================================================
+    // ============================================================
     // КАФЕДРЫ
-    // =========================================================
+    // ============================================================
 
     void showDepartments() {
 
         base("departments");
 
         content.addView(
-                title("Кафедры")
+                text("Кафедры", 28, NAVY, true)
         );
 
+        content.addView(
+                text(
+                        "Научные подразделения института",
+                        13,
+                        MUTED,
+                        false
+                )
+        );
+
+        addSpace(12);
+
         for (Department d : departments) {
+
             content.addView(
                     card(
                             d.name,
@@ -699,49 +1018,24 @@ public class MainActivity extends Activity {
         }
 
         content.addView(
-                nav(
-                        "＋ Добавить кафедру",
+                rowAction(
+                        "＋",
+                        "Добавить кафедру",
+                        "Создать новое научное подразделение",
                         this::addDepartment
                 )
         );
     }
 
-
     void addDepartment() {
 
-        final EditText name =
-                new EditText(this);
+        LinearLayout box = dialogBox();
 
-        name.setHint(
-                "Название кафедры"
-        );
-
-
-        final EditText desc =
-                new EditText(this);
-
-        desc.setHint(
-                "Научное направление"
-        );
-
-
-        LinearLayout box =
-                new LinearLayout(this);
-
-        box.setOrientation(
-                LinearLayout.VERTICAL
-        );
-
-        box.setPadding(
-                30,
-                10,
-                30,
-                0
-        );
+        EditText name = field("Название кафедры");
+        EditText desc = field("Научное направление");
 
         box.addView(name);
         box.addView(desc);
-
 
         new AlertDialog.Builder(this)
                 .setTitle("Новая кафедра")
@@ -751,114 +1045,181 @@ public class MainActivity extends Activity {
                         (d, w) -> {
 
                             String n =
-                                    name.getText()
-                                            .toString()
-                                            .trim();
+                                    name.getText().toString().trim();
 
                             if (!n.isEmpty()) {
 
-                                String description =
-                                        desc.getText()
-                                                .toString();
+                                String de =
+                                        desc.getText().toString();
 
-                                departments.add(
-                                        new Department(
-                                                n,
-                                                description
-                                        )
-                                );
+                                Department x =
+                                        new Department(n, de);
 
-                                db.addDepartment(
-                                        n,
-                                        description
-                                );
+                                departments.add(x);
+
+                                db.addDepartment(n, de);
 
                                 showDepartments();
                             }
                         }
                 )
-                .setNegativeButton(
-                        "Отмена",
-                        null
-                )
+                .setNegativeButton("Отмена", null)
                 .show();
     }
 
-
-    // =========================================================
+    // ============================================================
     // АГЕНТЫ
-    // =========================================================
+    // ============================================================
 
     void showAgents() {
 
         base("agents");
 
         content.addView(
-                title("Научные агенты")
+                text("Научные агенты", 28, NAVY, true)
         );
 
+        content.addView(
+                text(
+                        "Исследователи, методологи, критики и редакторы",
+                        13,
+                        MUTED,
+                        false
+                )
+        );
+
+        addSpace(12);
 
         for (final Agent a : agents) {
 
-            TextView av =
-                    card(
-                            a.name,
-                            a.role +
-                                    " • " +
-                                    a.department
-                    );
+            LinearLayout row =
+                    new LinearLayout(this);
 
-            av.setOnClickListener(
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(15), dp(13), dp(12), dp(13));
+            row.setBackground(roundDrawable(CARD, 16));
+            row.setOnClickListener(
                     v -> showAgentProfile(a)
             );
 
-            content.addView(av);
+            TextView avatar =
+                    text(
+                            a.name.substring(0, 1),
+                            20,
+                            Color.WHITE,
+                            true
+                    );
+
+            avatar.setGravity(Gravity.CENTER);
+            avatar.setBackground(
+                    roundDrawable(BLUE, 30)
+            );
+
+            row.addView(
+                    avatar,
+                    new LinearLayout.LayoutParams(
+                            dp(48),
+                            dp(48)
+                    )
+            );
+
+            LinearLayout info =
+                    new LinearLayout(this);
+
+            info.setOrientation(LinearLayout.VERTICAL);
+            info.setPadding(dp(12), 0, 0, 0);
+
+            info.addView(
+                    text(
+                            a.name,
+                            16,
+                            TEXT,
+                            true
+                    )
+            );
+
+            info.addView(
+                    text(
+                            a.role,
+                            12,
+                            BLUE,
+                            false
+                    )
+            );
+
+            info.addView(
+                    text(
+                            a.department,
+                            11,
+                            MUTED,
+                            false
+                    )
+            );
+
+            row.addView(
+                    info,
+                    new LinearLayout.LayoutParams(
+                            0,
+                            -2,
+                            1
+                    )
+            );
+
+            row.addView(
+                    text("›", 26, MUTED, false)
+            );
+
+            LinearLayout.LayoutParams p =
+                    new LinearLayout.LayoutParams(-1, dp(75));
+
+            p.setMargins(0, 0, 0, dp(9));
+
+            row.setLayoutParams(p);
+
+            content.addView(row);
         }
 
-
         content.addView(
-                nav(
-                        "＋ Создать агента",
+                rowAction(
+                        "＋",
+                        "Создать агента",
+                        "Добавить нового научного сотрудника",
                         this::addAgent
                 )
         );
     }
 
+    void showAgentProfile(final Agent a) {
 
-    void showAgentProfile(
-            final Agent a
-    ) {
-
-        base("agent_profile");
+        base("agent");
 
         content.addView(
-                title(
-                        "Профиль научного агента"
+                text(
+                        "Профиль научного агента",
+                        26,
+                        NAVY,
+                        true
                 )
         );
-
 
         content.addView(
                 card(
                         a.name,
-                        a.role +
-                                "\nКафедра: " +
-                                a.department
+                        a.role + "\n" +
+                        "Кафедра: " + a.department
                 )
         );
-
 
         String q =
                 agentQualifications.containsKey(a.name)
                         ? agentQualifications.get(a.name)
                         : "Не установлена";
 
-
         String c =
                 agentCompetencies.containsKey(a.name)
                         ? agentCompetencies.get(a.name)
                         : "Не указаны";
-
 
         content.addView(
                 card(
@@ -867,7 +1228,6 @@ public class MainActivity extends Activity {
                 )
         );
 
-
         content.addView(
                 card(
                         "Компетенции",
@@ -875,200 +1235,54 @@ public class MainActivity extends Activity {
                 )
         );
 
-
         content.addView(
-                card(
-                        "Обучение",
-                        "Пройденные курсы будут отображаться здесь и влиять на профиль квалификации."
-                )
-        );
-
-
-        content.addView(
-                card(
-                        "Научная деятельность",
-                        "Поручения, статьи, НИР и результаты конкурсов будут связаны с профилем агента."
-                )
-        );
-
-
-        content.addView(
-                nav(
-                        "✎ Изменить квалификацию и компетенции",
+                rowAction(
+                        "✎",
+                        "Профиль компетенций",
+                        "Квалификация и научные компетенции",
                         () -> editAgentProfile(a)
                 )
         );
 
-
         content.addView(
-                nav(
-                        "📚 Назначить обучение",
+                rowAction(
+                        "📚",
+                        "Повышение квалификации",
+                        "Назначить обучение агенту",
                         this::showCourses
                 )
         );
     }
 
-
-    void editAgentProfile(
-            final Agent a
-    ) {
-
-        LinearLayout box =
-                new LinearLayout(this);
-
-        box.setOrientation(
-                LinearLayout.VERTICAL
-        );
-
-        box.setPadding(
-                30,
-                0,
-                30,
-                0
-        );
-
-
-        EditText q =
-                new EditText(this);
-
-        q.setHint(
-                "Квалификационный уровень"
-        );
-
-        q.setText(
-                agentQualifications.get(a.name)
-        );
-
-
-        EditText c =
-                new EditText(this);
-
-        c.setHint(
-                "Компетенции через запятую"
-        );
-
-        c.setText(
-                agentCompetencies.get(a.name)
-        );
-
-
-        box.addView(q);
-        box.addView(c);
-
-
-        new AlertDialog.Builder(this)
-                .setTitle(
-                        "Профиль компетенций"
-                )
-                .setView(box)
-                .setPositiveButton(
-                        "Сохранить",
-                        (d, w) -> {
-
-                            String qualification =
-                                    q.getText()
-                                            .toString();
-
-                            String competencies =
-                                    c.getText()
-                                            .toString();
-
-                            agentQualifications.put(
-                                    a.name,
-                                    qualification
-                            );
-
-                            agentCompetencies.put(
-                                    a.name,
-                                    competencies
-                            );
-
-                            db.saveAgentProfile(
-                                    a.name,
-                                    qualification,
-                                    competencies
-                            );
-
-                            showAgentProfile(a);
-                        }
-                )
-                .setNegativeButton(
-                        "Отмена",
-                        null
-                )
-                .show();
-    }
-
-
     void addAgent() {
 
-        LinearLayout box =
-                new LinearLayout(this);
+        LinearLayout box = dialogBox();
 
-        box.setOrientation(
-                LinearLayout.VERTICAL
-        );
-
-        box.setPadding(
-                30,
-                0,
-                30,
-                0
-        );
-
-
-        EditText n =
-                new EditText(this);
-
-        n.setHint(
-                "Имя агента"
-        );
-
-
-        EditText r =
-                new EditText(this);
-
-        r.setHint(
-                "Роль / специализация"
-        );
-
-
-        EditText dep =
-                new EditText(this);
-
-        dep.setHint(
-                "Кафедра"
-        );
-
+        EditText n = field("Имя агента");
+        EditText r = field("Роль / специализация");
+        EditText dep = field("Кафедра");
 
         box.addView(n);
         box.addView(r);
         box.addView(dep);
 
-
         new AlertDialog.Builder(this)
-                .setTitle(
-                        "Новый научный агент"
-                )
+                .setTitle("Новый научный агент")
                 .setView(box)
                 .setPositiveButton(
                         "Создать",
                         (d, w) -> {
 
                             String name =
-                                    n.getText()
-                                            .toString()
-                                            .trim();
+                                    n.getText().toString().trim();
 
                             if (!name.isEmpty()) {
 
                                 String role =
-                                        r.getText()
-                                                .toString();
+                                        r.getText().toString();
 
                                 String department =
-                                        dep.getText()
-                                                .toString();
+                                        dep.getText().toString();
 
                                 agents.add(
                                         new Agent(
@@ -1088,130 +1302,229 @@ public class MainActivity extends Activity {
                             }
                         }
                 )
-                .setNegativeButton(
-                        "Отмена",
-                        null
-                )
+                .setNegativeButton("Отмена", null)
                 .show();
     }
 
+    void editAgentProfile(final Agent a) {
 
-    // =========================================================
+        LinearLayout box = dialogBox();
+
+        EditText q = field(
+                "Квалификационный уровень"
+        );
+        q.setText(
+                agentQualifications.get(a.name)
+        );
+
+        EditText c = field(
+                "Компетенции через запятую"
+        );
+        c.setText(
+                agentCompetencies.get(a.name)
+        );
+
+        box.addView(q);
+        box.addView(c);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Профиль компетенций")
+                .setView(box)
+                .setPositiveButton(
+                        "Сохранить",
+                        (d, w) -> {
+
+                            String qs =
+                                    q.getText().toString();
+
+                            String cs =
+                                    c.getText().toString();
+
+                            agentQualifications.put(
+                                    a.name,
+                                    qs
+                            );
+
+                            agentCompetencies.put(
+                                    a.name,
+                                    cs
+                            );
+
+                            db.saveAgentProfile(
+                                    a.name,
+                                    qs,
+                                    cs
+                            );
+
+                            showAgentProfile(a);
+                        }
+                )
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    // ============================================================
+    // АКАДЕМИЯ
+    // ============================================================
+
+    void showCourses() {
+
+        base("courses");
+
+        content.addView(
+                text(
+                        "Академия института",
+                        28,
+                        NAVY,
+                        true
+                )
+        );
+
+        content.addView(
+                card(
+                        "Повышение квалификации",
+                        "Ректор добавляет учебные материалы, ссылки и документы. В дальнейшем агент изучает материал, проходит тестирование и получает новую квалификацию."
+                )
+        );
+
+        for (Course c : courses) {
+
+            content.addView(
+                    card(
+                            c.title,
+                            c.material +
+                            "\nСтатус: " +
+                            c.status
+                    )
+            );
+        }
+
+        content.addView(
+                rowAction(
+                        "＋",
+                        "Создать курс",
+                        "Добавить материал или ссылку",
+                        this::addCourse
+                )
+        );
+    }
+
+    void addCourse() {
+
+        LinearLayout box = dialogBox();
+
+        EditText t = field("Название курса");
+        EditText m = field(
+                "Ссылка или название материала"
+        );
+
+        box.addView(t);
+        box.addView(m);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Повышение квалификации")
+                .setView(box)
+                .setPositiveButton(
+                        "Назначить",
+                        (d, w) -> {
+
+                            String title =
+                                    t.getText().toString().trim();
+
+                            if (!title.isEmpty()) {
+
+                                Course c =
+                                        new Course(
+                                                title,
+                                                m.getText().toString()
+                                        );
+
+                                courses.add(c);
+
+                                db.addCourse(
+                                        title,
+                                        c.material
+                                );
+
+                                showCourses();
+                            }
+                        }
+                )
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    // ============================================================
     // НАУЧНОЕ ПРОИЗВОДСТВО
-    // =========================================================
+    // ============================================================
 
     void showAssignments() {
 
         base("assignments");
 
         content.addView(
-                title("Научные поручения")
-        );
-
-
-        content.addView(
-                card(
-                        "Доказательная база",
-                        "К научному поручению будут привязываться документы и интернет-источники."
-                )
-        );
-
-
-        content.addView(
-                card(
+                text(
                         "Научное производство",
-                        "Ректор ставит задачу, выбирает тип продукции и назначает кафедры/агентов."
+                        28,
+                        NAVY,
+                        true
                 )
         );
 
+        content.addView(
+                card(
+                        "Ректорское поручение",
+                        "Ректор задаёт тему, тип продукции, объём и требования. Далее задача может быть передана в мультиагентный конвейер."
+                )
+        );
 
         for (Assignment a : assignments) {
 
             content.addView(
                     card(
-                            a.type +
-                                    ": " +
-                                    a.title,
-
-                            "Статус: " +
-                                    a.status +
-                                    "\nКафедры: " +
-                                    a.departments +
-                                    "\nАгенты: " +
-                                    a.agents
+                            a.type + "\n" + a.title,
+                            "Статус: " + a.status +
+                            "\nКафедры: " + a.departments +
+                            "\nАгенты: " + a.agents
                     )
             );
         }
 
-
         content.addView(
-                nav(
-                        "＋ Новое научное поручение",
+                rowAction(
+                        "＋",
+                        "Новое научное поручение",
+                        "НИР, статья, справка, доклад и другие продукты",
                         this::addAssignment
                 )
         );
     }
 
-
     void addAssignment() {
 
-        LinearLayout box =
-                new LinearLayout(this);
-
-        box.setOrientation(
-                LinearLayout.VERTICAL
-        );
-
-        box.setPadding(
-                30,
-                0,
-                30,
-                0
-        );
-
+        LinearLayout box = dialogBox();
 
         EditText title =
-                new EditText(this);
-
-        title.setHint(
-                "Тема / название поручения"
-        );
-
+                field("Тема / название поручения");
 
         EditText type =
-                new EditText(this);
-
-        type.setHint(
-                "Тип: НИР, обзорная справка, статья, доклад..."
-        );
-
+                field("Тип: НИР, статья, справка, доклад...");
 
         EditText dep =
-                new EditText(this);
-
-        dep.setHint(
-                "Кафедры"
-        );
-
+                field("Кафедры");
 
         EditText ag =
-                new EditText(this);
-
-        ag.setHint(
-                "Агенты или автоматически подобрать"
-        );
-
+                field(
+                        "Агенты или: автоматически подобрать"
+                );
 
         box.addView(title);
         box.addView(type);
         box.addView(dep);
         box.addView(ag);
 
-
         new AlertDialog.Builder(this)
-                .setTitle(
-                        "Новое научное поручение"
-                )
+                .setTitle("Новое научное поручение")
                 .setView(box)
                 .setPositiveButton(
                         "Создать",
@@ -1224,190 +1537,768 @@ public class MainActivity extends Activity {
 
                             if (!t.isEmpty()) {
 
-                                String ty =
-                                        type.getText()
-                                                .toString();
-
-                                String departmentsText =
-                                        dep.getText()
-                                                .toString();
-
-                                String agentsText =
-                                        ag.getText()
-                                                .toString();
-
-                                assignments.add(
+                                Assignment a =
                                         new Assignment(
                                                 t,
-                                                ty,
-                                                departmentsText,
-                                                agentsText
-                                        )
-                                );
+                                                type.getText().toString(),
+                                                dep.getText().toString(),
+                                                ag.getText().toString()
+                                        );
+
+                                assignments.add(a);
 
                                 db.addAssignment(
-                                        t,
-                                        ty,
-                                        departmentsText,
-                                        agentsText
+                                        a.title,
+                                        a.type,
+                                        a.departments,
+                                        a.agents
                                 );
 
                                 showAssignments();
                             }
                         }
                 )
-                .setNegativeButton(
-                        "Отмена",
-                        null
-                )
+                .setNegativeButton("Отмена", null)
                 .show();
     }
 
+    // ============================================================
+    // AI-ОРКЕСТРАТОР
+    // ============================================================
 
-    // =========================================================
-    // АКАДЕМИЯ
-    // =========================================================
+    void showPipelines() {
 
-    void showCourses() {
-
-        base("courses");
-
-        content.addView(
-                title("Академия института")
-        );
-
+        base("pipelines");
 
         content.addView(
-                card(
-                        "Повышение квалификации",
-                        "Ректор добавляет учебные материалы, ссылки и документы."
+                text(
+                        "AI-оркестратор",
+                        28,
+                        NAVY,
+                        true
                 )
         );
 
+        content.addView(
+                card(
+                        "Мультиагентный научный конвейер",
+                        "Декомпозиция → подбор агентов → исследование → документы → критик → рецензирование → редактура → готовый научный продукт."
+                )
+        );
 
-        for (Course c : courses) {
+        for (final PipelineJob p : pipelineJobs) {
+
+            TextView v =
+                    card(
+                            p.title,
+                            "Тип: " + p.type +
+                            "\nСтатус: " + p.status +
+                            "\nОбъём: " + p.pages
+                    );
+
+            v.setOnClickListener(
+                    x -> showPipelineDetail(p)
+            );
+
+            content.addView(v);
+        }
+
+        content.addView(
+                rowAction(
+                        "＋",
+                        "Запустить научный конвейер",
+                        "Создать новое ректорское задание",
+                        this::addPipeline
+                )
+        );
+    }
+
+    void addPipeline() {
+
+        LinearLayout box = dialogBox();
+
+        EditText title =
+                field("Название исследования / поручения");
+
+        Spinner type = new Spinner(this);
+
+        String[] types = {
+                "НИР",
+                "Научная статья",
+                "Обзорная справка",
+                "Аналитическая справка",
+                "Обзор литературы",
+                "Доклад",
+                "Монография",
+                "Диссертационное исследование",
+                "Методические материалы",
+                "Технический отчёт",
+                "Другое"
+        };
+
+        type.setAdapter(
+                new ArrayAdapter<String>(
+                        this,
+                        android.R.layout.simple_spinner_dropdown_item,
+                        types
+                )
+        );
+
+        EditText pages =
+                field(
+                        "Требуемый объём, страниц"
+                );
+
+        EditText standard =
+                field(
+                        "ВАК / ГОСТ / журнал / организация"
+                );
+
+        EditText deadline =
+                field("Срок выполнения");
+
+        EditText field =
+                field("Научная область / кафедра");
+
+        EditText web =
+                field("Web Research: да/нет");
+
+        EditText reviewers =
+                field(
+                        "Рецензирование: да/нет; число рецензентов"
+                );
+
+        box.addView(title);
+        box.addView(type);
+        box.addView(pages);
+        box.addView(standard);
+        box.addView(deadline);
+        box.addView(field);
+        box.addView(web);
+        box.addView(reviewers);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Ректорское научное поручение")
+                .setView(box)
+                .setPositiveButton(
+                        "Создать",
+                        (d, w) -> {
+
+                            String t =
+                                    title.getText()
+                                            .toString()
+                                            .trim();
+
+                            if (!t.isEmpty()) {
+
+                                PipelineJob p =
+                                        new PipelineJob(
+                                                t,
+                                                type.getSelectedItem()
+                                                        .toString(),
+                                                pages.getText().toString(),
+                                                standard.getText().toString(),
+                                                deadline.getText().toString(),
+                                                field.getText().toString(),
+                                                web.getText().toString(),
+                                                reviewers.getText().toString()
+                                        );
+
+                                pipelineJobs.add(p);
+
+                                db.addPipeline(
+                                        p.title,
+                                        p.type,
+                                        p.pages,
+                                        p.standard,
+                                        p.deadline,
+                                        p.field,
+                                        p.webResearch,
+                                        p.reviewers
+                                );
+
+                                showPipelines();
+                            }
+                        }
+                )
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    void showPipelineDetail(final PipelineJob p) {
+
+        base("pipeline");
+
+        content.addView(
+                text(
+                        "Научный конвейер",
+                        27,
+                        NAVY,
+                        true
+                )
+        );
+
+        content.addView(
+                card(
+                        p.title,
+                        "Тип продукции: " +
+                        p.type +
+                        "\nСтатус: " +
+                        p.status
+                )
+        );
+
+        content.addView(
+                card(
+                        "Техническое задание",
+                        "Объём: " + p.pages +
+                        "\nТребования: " + p.standard +
+                        "\nСрок: " + p.deadline +
+                        "\nОбласть: " + p.field +
+                        "\nWeb Research: " + p.webResearch +
+                        "\nРецензирование: " + p.reviewers
+                )
+        );
+
+        String[] stages = {
+                "1. Декомпозиция задачи",
+                "2. Подбор научной группы",
+                "3. Web Research",
+                "4. Анализ документов",
+                "5. Исследовательская работа",
+                "6. Критическая проверка",
+                "7. Рецензирование",
+                "8. Научное редактирование",
+                "9. Формирование продукции"
+        };
+
+        for (final String stage : stages) {
 
             content.addView(
-                    card(
-                            c.title,
-                            c.material +
-                                    "\nСтатус: " +
-                                    c.status
+                    rowAction(
+                            "●",
+                            stage,
+                            "Нажмите, чтобы создать задачу агенту",
+                            () -> addTaskForStage(p, stage)
                     )
             );
         }
 
+        content.addView(
+                rowAction(
+                        "📐",
+                        "План объёма и структуры",
+                        "Разделы, страницы и слова",
+                        () -> planPipeline(p)
+                )
+        );
 
         content.addView(
-                nav(
-                        "＋ Создать курс / назначение",
-                        this::addCourse
+                rowAction(
+                        "📋",
+                        "Задачи агентов",
+                        "Просмотр и изменение статусов",
+                        () -> showTasksForPipeline(p)
+                )
+        );
+
+        content.addView(
+                rowAction(
+                        "▶",
+                        "Перевести в работу",
+                        "Статус: В работе",
+                        () -> {
+                            p.status = "В работе";
+                            db.updatePipelineStatus(
+                                    p.title,
+                                    p.status
+                            );
+                            showPipelineDetail(p);
+                        }
+                )
+        );
+
+        content.addView(
+                rowAction(
+                        "✓",
+                        "Завершить",
+                        "Научная продукция готова",
+                        () -> {
+                            p.status = "Завершено";
+                            db.updatePipelineStatus(
+                                    p.title,
+                                    p.status
+                            );
+                            showPipelineDetail(p);
+                        }
                 )
         );
     }
 
+    void addTaskForStage(
+            final PipelineJob p,
+            final String stage
+    ) {
 
-    void addCourse() {
+        LinearLayout box = dialogBox();
 
-        LinearLayout box =
-                new LinearLayout(this);
+        EditText task =
+                field("Задача для агента");
 
-        box.setOrientation(
-                LinearLayout.VERTICAL
+        EditText agent =
+                field(
+                        "Агент или: подобрать автоматически"
+                );
+
+        box.addView(task);
+        box.addView(agent);
+
+        Button suggest =
+                smallButton(
+                        "🧠 Подобрать по компетенциям"
+                );
+
+        suggest.setOnClickListener(
+                v -> agent.setText(
+                        suggestAgents(
+                                task.getText().toString()
+                        )
+                )
         );
 
-        box.setPadding(
-                30,
-                0,
-                30,
-                0
-        );
-
-
-        EditText t =
-                new EditText(this);
-
-        t.setHint(
-                "Название курса"
-        );
-
-
-        EditText m =
-                new EditText(this);
-
-        m.setHint(
-                "Ссылка или название материала"
-        );
-
-
-        box.addView(t);
-        box.addView(m);
-
+        box.addView(suggest);
 
         new AlertDialog.Builder(this)
-                .setTitle(
-                        "Повышение квалификации"
-                )
+                .setTitle(stage)
                 .setView(box)
                 .setPositiveButton(
-                        "Назначить",
+                        "Создать",
                         (d, w) -> {
 
-                            String title =
-                                    t.getText()
+                            String t =
+                                    task.getText()
                                             .toString()
                                             .trim();
 
-                            if (!title.isEmpty()) {
+                            if (!t.isEmpty()) {
 
-                                String material =
-                                        m.getText()
+                                String a =
+                                        agent.getText()
                                                 .toString();
 
-                                courses.add(
-                                        new Course(
-                                                title,
-                                                material
-                                        )
+                                AgentTask x =
+                                        new AgentTask(
+                                                p.title,
+                                                stage,
+                                                t,
+                                                a
+                                        );
+
+                                agentTasks.add(x);
+
+                                db.addAgentTask(
+                                        p.title,
+                                        stage,
+                                        t,
+                                        a
                                 );
 
-                                db.addCourse(
-                                        title,
-                                        material
-                                );
-
-                                showCourses();
+                                showPipelineDetail(p);
                             }
                         }
                 )
-                .setNegativeButton(
-                        "Отмена",
-                        null
-                )
+                .setNegativeButton("Отмена", null)
                 .show();
     }
 
+    String suggestAgents(String task) {
 
-    // =========================================================
+        if (agents.size() == 0) {
+            return "Нет зарегистрированных агентов";
+        }
+
+        String q =
+                task == null
+                        ? ""
+                        : task.toLowerCase();
+
+        StringBuilder out =
+                new StringBuilder();
+
+        for (Agent a : agents) {
+
+            String c =
+                    agentCompetencies.get(a.name);
+
+            if (c == null) continue;
+
+            String lc = c.toLowerCase();
+
+            boolean match =
+                    (q.contains("норм") &&
+                     (lc.contains("прав") ||
+                      lc.contains("закон"))) ||
+
+                    (q.contains("дан") &&
+                     (lc.contains("анал") ||
+                      lc.contains("стат"))) ||
+
+                    (q.contains("радио") &&
+                     lc.contains("ради")) ||
+
+                    (q.contains("безопас") &&
+                     lc.contains("безопас")) ||
+
+                    (q.contains("исслед") &&
+                     lc.contains("исслед"));
+
+            if (match) {
+
+                if (out.length() > 0) {
+                    out.append(", ");
+                }
+
+                out.append(a.name);
+            }
+        }
+
+        if (out.length() == 0) {
+            out.append(agents.get(0).name);
+        }
+
+        return out.toString();
+    }
+
+    // ============================================================
+    // ПЛАН НИР
+    // ============================================================
+
+    void planPipeline(final PipelineJob p) {
+
+        LinearLayout box = dialogBox();
+
+        EditText sections =
+                field("Количество разделов");
+
+        EditText pages =
+                field("Страниц на раздел");
+
+        EditText words =
+                field("Ориентир слов на страницу");
+
+        box.addView(sections);
+        box.addView(pages);
+        box.addView(words);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Планирование научного объёма")
+                .setView(box)
+                .setPositiveButton(
+                        "Сформировать",
+                        (d, w) -> {
+
+                            int n = 1;
+                            int pg = 1;
+                            int wp = 300;
+
+                            try {
+                                n = Integer.parseInt(
+                                        sections.getText()
+                                                .toString()
+                                );
+                            } catch (Exception ignored) {}
+
+                            try {
+                                pg = Integer.parseInt(
+                                        pages.getText()
+                                                .toString()
+                                );
+                            } catch (Exception ignored) {}
+
+                            try {
+                                wp = Integer.parseInt(
+                                        words.getText()
+                                                .toString()
+                                );
+                            } catch (Exception ignored) {}
+
+                            for (int i = 1; i <= n; i++) {
+
+                                String title =
+                                        "Раздел " + i;
+
+                                ResearchSection rs =
+                                        new ResearchSection(
+                                                p.title,
+                                                title,
+                                                String.valueOf(pg),
+                                                String.valueOf(pg * wp),
+                                                "Подобрать автоматически"
+                                        );
+
+                                researchSections.add(rs);
+
+                                db.addSection(
+                                        p.title,
+                                        title,
+                                        String.valueOf(pg),
+                                        String.valueOf(pg * wp),
+                                        "Подобрать автоматически"
+                                );
+                            }
+
+                            showPlan(p);
+                        }
+                )
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    void showPlan(final PipelineJob p) {
+
+        base("plan");
+
+        content.addView(
+                text(
+                        "План исследования",
+                        27,
+                        NAVY,
+                        true
+                )
+        );
+
+        int totalPages = 0;
+        int totalWords = 0;
+        int count = 0;
+
+        for (ResearchSection r : researchSections) {
+
+            if (!r.pipeline.equals(p.title)) {
+                continue;
+            }
+
+            count++;
+
+            try {
+                totalPages +=
+                        Integer.parseInt(r.pages);
+            } catch (Exception ignored) {}
+
+            try {
+                totalWords +=
+                        Integer.parseInt(r.words);
+            } catch (Exception ignored) {}
+
+            content.addView(
+                    card(
+                            r.title,
+                            "Объём: " +
+                            r.pages +
+                            " стр.\n" +
+                            r.words +
+                            " слов\nАгент: " +
+                            r.agent
+                    )
+            );
+        }
+
+        content.addView(
+                card(
+                        "Итого",
+                        "Разделов: " + count +
+                        "\nПлановый объём: " +
+                        totalPages +
+                        " страниц" +
+                        "\nОриентир: " +
+                        totalWords +
+                        " слов"
+                )
+        );
+
+        content.addView(
+                rowAction(
+                        "＋",
+                        "Добавить раздел",
+                        "Расширить план НИР",
+                        () -> addSection(p)
+                )
+        );
+    }
+
+    void addSection(final PipelineJob p) {
+
+        LinearLayout box = dialogBox();
+
+        EditText t = field("Название раздела");
+        EditText pg = field("Страницы");
+        EditText w = field("Слова");
+        EditText a = field("Агент");
+
+        box.addView(t);
+        box.addView(pg);
+        box.addView(w);
+        box.addView(a);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Раздел исследования")
+                .setView(box)
+                .setPositiveButton(
+                        "Добавить",
+                        (d, x) -> {
+
+                            if (!t.getText()
+                                    .toString()
+                                    .trim()
+                                    .isEmpty()) {
+
+                                ResearchSection r =
+                                        new ResearchSection(
+                                                p.title,
+                                                t.getText().toString(),
+                                                pg.getText().toString(),
+                                                w.getText().toString(),
+                                                a.getText().toString()
+                                        );
+
+                                researchSections.add(r);
+
+                                db.addSection(
+                                        p.title,
+                                        r.title,
+                                        r.pages,
+                                        r.words,
+                                        r.agent
+                                );
+
+                                showPlan(p);
+                            }
+                        }
+                )
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    void showTasksForPipeline(final PipelineJob p) {
+
+        base("tasks");
+
+        content.addView(
+                text(
+                        "Задачи агентов",
+                        27,
+                        NAVY,
+                        true
+                )
+        );
+
+        boolean any = false;
+
+        for (final AgentTask t : agentTasks) {
+
+            if (!t.pipeline.equals(p.title)) {
+                continue;
+            }
+
+            any = true;
+
+            TextView v =
+                    card(
+                            t.stage,
+                            t.task +
+                            "\nАгент: " +
+                            t.agent +
+                            "\nСтатус: " +
+                            t.status
+                    );
+
+            v.setOnClickListener(
+                    x -> editAgentTask(t, p)
+            );
+
+            content.addView(v);
+        }
+
+        if (!any) {
+
+            content.addView(
+                    card(
+                            "Задач пока нет",
+                            "Откройте этап конвейера и создайте задачу агенту."
+                    )
+            );
+        }
+    }
+
+    void editAgentTask(
+            final AgentTask t,
+            final PipelineJob p
+    ) {
+
+        final String[] statuses = {
+                "Ожидает",
+                "В работе",
+                "На проверке",
+                "Доработка",
+                "Принято",
+                "Отклонено"
+        };
+
+        int selected = 0;
+
+        for (int i = 0; i < statuses.length; i++) {
+            if (statuses[i].equals(t.status)) {
+                selected = i;
+                break;
+            }
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle(t.task)
+                .setSingleChoiceItems(
+                        statuses,
+                        selected,
+                        (d, w) -> {
+
+                            t.status =
+                                    statuses[w];
+
+                            db.updateAgentTaskStatus(
+                                    t.task,
+                                    t.status
+                            );
+
+                            d.dismiss();
+
+                            showTasksForPipeline(p);
+                        }
+                )
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    // ============================================================
     // ДОКУМЕНТЫ
-    // =========================================================
+    // ============================================================
 
     void showDocuments() {
 
         base("documents");
 
         content.addView(
-                title("Документы института")
+                text(
+                        "Документы института",
+                        28,
+                        NAVY,
+                        true
+                )
         );
-
 
         content.addView(
                 card(
                         "Документальный контур",
-                        "Выбирайте PDF, DOCX и другие файлы из памяти телефона."
+                        "PDF, DOCX и другие файлы ректора. Следующий слой системы будет извлекать текст, индексировать документы и передавать релевантные фрагменты агентам."
                 )
         );
-
 
         for (DocumentItem d : documents) {
 
@@ -1415,51 +2306,127 @@ public class MainActivity extends Activity {
                     card(
                             d.name,
                             d.category +
-                                    "\nСвязь: " +
-                                    d.linkedTo +
-                                    "\n" +
-                                    d.uri
+                            "\nСвязь: " +
+                            d.linkedTo
                     );
 
             v.setOnClickListener(
-                    view -> showDocumentDetail(d)
+                    x -> showDocumentDetail(d)
             );
 
             content.addView(v);
         }
 
-
         content.addView(
-                nav(
-                        "🔎 Поиск по документам",
+                rowAction(
+                        "🔎",
+                        "Поиск по документам",
+                        "Название, категория и связь",
                         this::searchDocuments
                 )
         );
 
-
         content.addView(
-                nav(
-                        "＋ Загрузить документ",
+                rowAction(
+                        "＋",
+                        "Загрузить документ",
+                        "Выбрать файл из памяти телефона",
                         this::pickDocument
                 )
         );
     }
 
+    void pickDocument() {
+
+        Intent i =
+                new Intent(
+                        Intent.ACTION_OPEN_DOCUMENT
+                );
+
+        i.addCategory(
+                Intent.CATEGORY_OPENABLE
+        );
+
+        i.setType("*/*");
+
+        startActivityForResult(
+                i,
+                PICK_DOCUMENT
+        );
+    }
+
+    @Override
+    protected void onActivityResult(
+            int requestCode,
+            int resultCode,
+            Intent data
+    ) {
+
+        super.onActivityResult(
+                requestCode,
+                resultCode,
+                data
+        );
+
+        if (
+                requestCode == PICK_DOCUMENT &&
+                resultCode == RESULT_OK &&
+                data != null &&
+                data.getData() != null
+        ) {
+
+            Uri u = data.getData();
+
+            try {
+
+                getContentResolver()
+                        .takePersistableUriPermission(
+                                u,
+                                Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        );
+
+            } catch (Exception ignored) {}
+
+            String name =
+                    u.getLastPathSegment();
+
+            if (name == null) {
+                name = "Документ";
+            }
+
+            String uri =
+                    u.toString();
+
+            DocumentItem d =
+                    new DocumentItem(
+                            name,
+                            uri,
+                            "Не классифицирован",
+                            "Не назначен"
+                    );
+
+            documents.add(d);
+
+            db.addDocument(
+                    name,
+                    uri,
+                    d.category,
+                    d.linkedTo
+            );
+
+            showDocuments();
+        }
+    }
 
     void searchDocuments() {
 
         final EditText q =
-                new EditText(this);
-
-        q.setHint(
-                "Введите тему, термин или фразу"
-        );
-
+                field(
+                        "Введите тему, термин или фразу"
+                );
 
         new AlertDialog.Builder(this)
-                .setTitle(
-                        "Поиск по документам"
-                )
+                .setTitle("Поиск по документам")
                 .setView(q)
                 .setPositiveButton(
                         "Искать",
@@ -1471,14 +2438,16 @@ public class MainActivity extends Activity {
                                             .trim()
                                             .toLowerCase();
 
-                            base("document_search");
+                            base("search");
 
                             content.addView(
-                                    title(
-                                            "Результаты поиска"
+                                    text(
+                                            "Результаты поиска",
+                                            27,
+                                            NAVY,
+                                            true
                                     )
                             );
-
 
                             if (query.isEmpty()) {
 
@@ -1492,20 +2461,22 @@ public class MainActivity extends Activity {
                                 return;
                             }
 
-
                             boolean found = false;
 
-
-                            for (DocumentItem x : documents) {
+                            for (DocumentItem x :
+                                    documents) {
 
                                 if (
-                                        x.name.toLowerCase()
+                                        x.name
+                                                .toLowerCase()
                                                 .contains(query)
-                                                ||
-                                        x.category.toLowerCase()
+                                        ||
+                                        x.category
+                                                .toLowerCase()
                                                 .contains(query)
-                                                ||
-                                        x.linkedTo.toLowerCase()
+                                        ||
+                                        x.linkedTo
+                                                .toLowerCase()
                                                 .contains(query)
                                 ) {
 
@@ -1515,90 +2486,68 @@ public class MainActivity extends Activity {
                                             card(
                                                     x.name,
                                                     "Категория: " +
-                                                            x.category +
-                                                            "\nСвязь: " +
-                                                            x.linkedTo
+                                                    x.category +
+                                                    "\nСвязь: " +
+                                                    x.linkedTo
                                             )
                                     );
                                 }
                             }
-
 
                             if (!found) {
 
                                 content.addView(
                                         card(
                                                 "Ничего не найдено",
-                                                "Полнотекстовый и смысловой поиск по PDF/DOCX будет подключён следующим слоем."
+                                                "Полнотекстовый и смысловой поиск по содержимому PDF/DOCX будет подключён через локальный индекс документов."
                                         )
                                 );
                             }
                         }
                 )
-                .setNegativeButton(
-                        "Отмена",
-                        null
-                )
+                .setNegativeButton("Отмена", null)
                 .show();
     }
-
 
     void showDocumentDetail(
             final DocumentItem d
     ) {
 
-        base("document_detail");
+        base("document");
 
         content.addView(
-                title(
-                        "Карточка документа"
+                text(
+                        "Карточка документа",
+                        27,
+                        NAVY,
+                        true
                 )
         );
-
 
         content.addView(
                 card(
                         d.name,
-                        "URI: " + d.uri
-                )
-        );
-
-
-        content.addView(
-                card(
-                        "Категория",
-                        d.category
-                )
-        );
-
-
-        content.addView(
-                card(
-                        "Связан с",
+                        "Категория: " +
+                        d.category +
+                        "\nСвязан с: " +
                         d.linkedTo
                 )
         );
 
-
         content.addView(
-                card(
-                        "AI-обработка",
-                        "Следующий слой: извлечение текста, разбиение на фрагменты, индексирование и передача релевантных фрагментов агентам."
-                )
-        );
-
-
-        content.addView(
-                nav(
-                        "✎ Классифицировать и связать",
+                rowAction(
+                        "✎",
+                        "Классифицировать",
+                        "Связать с агентом, кафедрой или НИР",
                         () -> editDocument(d)
                 )
         );
 
-
         content.addView(
-                nav(
-                        "📖 Открыть файл",
+                rowAction(
+                        "📖",
+                        "Открыть файл",
+                        "Передать файл соответствующему приложению",
                         () -> {
 
                             try {
@@ -1631,70 +2580,41 @@ public class MainActivity extends Activity {
         );
     }
 
-
     void editDocument(
             final DocumentItem d
     ) {
 
-        LinearLayout box =
-                new LinearLayout(this);
-
-        box.setOrientation(
-                LinearLayout.VERTICAL
-        );
-
-        box.setPadding(
-                30,
-                0,
-                30,
-                0
-        );
-
+        LinearLayout box = dialogBox();
 
         EditText c =
-                new EditText(this);
+                field(
+                        "Категория: учебный материал / НИР / нормативный документ / статья"
+                );
 
-        c.setHint(
-                "Категория"
-        );
-
-        c.setText(
-                d.category
-        );
-
+        c.setText(d.category);
 
         EditText l =
-                new EditText(this);
+                field(
+                        "Связь: агент / кафедра / курс / НИР"
+                );
 
-        l.setHint(
-                "Связь: агент / кафедра / курс / НИР"
-        );
-
-        l.setText(
-                d.linkedTo
-        );
-
+        l.setText(d.linkedTo);
 
         box.addView(c);
         box.addView(l);
 
-
         new AlertDialog.Builder(this)
-                .setTitle(
-                        "Классификация документа"
-                )
+                .setTitle("Классификация документа")
                 .setView(box)
                 .setPositiveButton(
                         "Сохранить",
                         (x, w) -> {
 
                             d.category =
-                                    c.getText()
-                                            .toString();
+                                    c.getText().toString();
 
                             d.linkedTo =
-                                    l.getText()
-                                            .toString();
+                                    l.getText().toString();
 
                             db.updateDocument(
                                     d.name,
@@ -1705,1262 +2625,33 @@ public class MainActivity extends Activity {
                             showDocumentDetail(d);
                         }
                 )
-                .setNegativeButton(
-                        "Отмена",
-                        null
-                )
+                .setNegativeButton("Отмена", null)
                 .show();
     }
 
-
-    void pickDocument() {
-
-        Intent i =
-                new Intent(
-                        Intent.ACTION_OPEN_DOCUMENT
-                );
-
-        i.addCategory(
-                Intent.CATEGORY_OPENABLE
-        );
-
-        i.setType("*/*");
-
-        startActivityForResult(
-                i,
-                PICK_DOCUMENT
-        );
-    }
-
-
-    @Override
-    protected void onActivityResult(
-            int requestCode,
-            int resultCode,
-            Intent data
-    ) {
-
-        super.onActivityResult(
-                requestCode,
-                resultCode,
-                data
-        );
-
-
-        if (
-                requestCode == PICK_DOCUMENT
-                        &&
-                resultCode == RESULT_OK
-                        &&
-                data != null
-                        &&
-                data.getData() != null
-        ) {
-
-            Uri u =
-                    data.getData();
-
-
-            try {
-
-                getContentResolver()
-                        .takePersistableUriPermission(
-                                u,
-                                Intent.FLAG_GRANT_READ_URI_PERMISSION
-                        );
-
-            } catch (Exception ignored) {
-            }
-
-
-            String name =
-                    u.getLastPathSegment();
-
-            String uri =
-                    u.toString();
-
-
-            if (name == null) {
-                name = "Документ";
-            }
-
-
-            documents.add(
-                    new DocumentItem(
-                            name,
-                            uri,
-                            "Не классифицирован",
-                            "Не назначен"
-                    )
-            );
-
-
-            db.addDocument(
-                    name,
-                    uri,
-                    "Не классифицирован",
-                    "Не назначен"
-            );
-
-
-            showDocuments();
-        }
-    }
-
-
-    // =========================================================
-    // КОМПЕТЕНЦИИ
-    // =========================================================
-
-    String suggestAgents(String task) {
-
-        if (agents.size() == 0) {
-            return "Нет зарегистрированных агентов";
-        }
-
-
-        String q =
-                task.toLowerCase();
-
-
-        StringBuilder out =
-                new StringBuilder();
-
-
-        for (Agent a : agents) {
-
-            String c =
-                    agentCompetencies.get(a.name);
-
-
-            if (c != null && !c.isEmpty()) {
-
-                String lc =
-                        c.toLowerCase();
-
-
-                if (
-                        q.contains("норм")
-                                &&
-                        lc.contains("прав")
-                ) {
-
-                    if (out.length() > 0) {
-                        out.append(", ");
-                    }
-
-                    out.append(a.name);
-
-                } else if (
-                        q.contains("дан")
-                                &&
-                        (
-                                lc.contains("анал")
-                                        ||
-                                lc.contains("стат")
-                        )
-                ) {
-
-                    if (out.length() > 0) {
-                        out.append(", ");
-                    }
-
-                    out.append(a.name);
-
-                } else if (
-                        q.contains("радио")
-                                &&
-                        lc.contains("ради")
-                ) {
-
-                    if (out.length() > 0) {
-                        out.append(", ");
-                    }
-
-                    out.append(a.name);
-                }
-            }
-        }
-
-
-        if (out.length() == 0) {
-            out.append(agents.get(0).name);
-        }
-
-
-        return out.toString();
-    }
-
-
-    // =========================================================
-    // СОРЕВНОВАНИЯ
-    // =========================================================
-
-    void showCompetitions() {
-
-        base("competitions");
-
-        content.addView(
-                title("Соревнования агентов")
-        );
-
-
-        content.addView(
-                card(
-                        "Научное соревнование",
-                        "Одинаковая задача может быть передана нескольким агентам. Результаты сравниваются и проходят рецензирование."
-                )
-        );
-
-
-        for (Competition c : competitions) {
-
-            content.addView(
-                    card(
-                            c.title,
-                            "Задача: " +
-                                    c.task +
-                                    "\nУчастники: " +
-                                    c.participants +
-                                    "\nСтатус: " +
-                                    c.status
-                    )
-            );
-        }
-
-
-        content.addView(
-                nav(
-                        "＋ Новое соревнование",
-                        this::addCompetition
-                )
-        );
-    }
-
-
-    void addCompetition() {
-
-        LinearLayout box =
-                new LinearLayout(this);
-
-        box.setOrientation(
-                LinearLayout.VERTICAL
-        );
-
-        box.setPadding(
-                30,
-                0,
-                30,
-                0
-        );
-
-
-        EditText t =
-                new EditText(this);
-
-        t.setHint(
-                "Название соревнования"
-        );
-
-
-        EditText task =
-                new EditText(this);
-
-        task.setHint(
-                "Одинаковая научная задача"
-        );
-
-
-        EditText p =
-                new EditText(this);
-
-        p.setHint(
-                "Участники: агенты через запятую"
-        );
-
-
-        box.addView(t);
-        box.addView(task);
-        box.addView(p);
-
-
-        new AlertDialog.Builder(this)
-                .setTitle(
-                        "Соревнование агентов"
-                )
-                .setView(box)
-                .setPositiveButton(
-                        "Создать",
-                        (d, w) -> {
-
-                            String title =
-                                    t.getText()
-                                            .toString()
-                                            .trim();
-
-                            if (!title.isEmpty()) {
-
-                                String taskText =
-                                        task.getText()
-                                                .toString();
-
-                                String participants =
-                                        p.getText()
-                                                .toString();
-
-                                competitions.add(
-                                        new Competition(
-                                                title,
-                                                taskText,
-                                                participants
-                                        )
-                                );
-
-                                db.addCompetition(
-                                        title,
-                                        taskText,
-                                        participants
-                                );
-
-                                showCompetitions();
-                            }
-                        }
-                )
-                .setNegativeButton(
-                        "Отмена",
-                        null
-                )
-                .show();
-    }
-
-
-    // =========================================================
-    // AI-ОРКЕСТРАТОР
-    // =========================================================
-
-    void showPipelines() {
-
-        base("pipelines");
-
-        content.addView(
-                title("AI-оркестратор")
-        );
-
-
-        content.addView(
-                card(
-                        "Мультиагентный научный конвейер",
-                        "Поручение ректора проходит последовательность этапов."
-                )
-        );
-
-
-        for (final PipelineJob p : pipelineJobs) {
-
-            TextView pv =
-                    card(
-                            p.title,
-                            "Тип: " +
-                                    p.type +
-                                    "\nСтатус: " +
-                                    p.status +
-                                    "\nЭтапы: " +
-                                    p.stages
-                    );
-
-
-            pv.setOnClickListener(
-                    v -> showPipelineDetail(p)
-            );
-
-
-            content.addView(pv);
-        }
-
-
-        content.addView(
-                nav(
-                        "＋ Запустить научный конвейер",
-                        this::addPipeline
-                )
-        );
-    }
-
-
-    void addTaskForStage(
-            final PipelineJob p,
-            final String stage
-    ) {
-
-        LinearLayout box =
-                new LinearLayout(this);
-
-        box.setOrientation(
-                LinearLayout.VERTICAL
-        );
-
-        box.setPadding(
-                30,
-                0,
-                30,
-                0
-        );
-
-
-        EditText task =
-                new EditText(this);
-
-        task.setHint(
-                "Задача для агента"
-        );
-
-
-        EditText agent =
-                new EditText(this);
-
-        agent.setHint(
-                "Агент или подобрать автоматически"
-        );
-
-
-        box.addView(task);
-        box.addView(agent);
-
-
-        box.addView(
-                nav(
-                        "🧠 Подобрать по компетенциям",
-                        () ->
-                                agent.setText(
-                                        suggestAgents(
-                                                task.getText()
-                                                        .toString()
-                                        )
-                                )
-                )
-        );
-
-
-        new AlertDialog.Builder(this)
-                .setTitle(stage)
-                .setView(box)
-                .setPositiveButton(
-                        "Создать",
-                        (d, w) -> {
-
-                            String t =
-                                    task.getText()
-                                            .toString()
-                                            .trim();
-
-                            if (!t.isEmpty()) {
-
-                                String a =
-                                        agent.getText()
-                                                .toString();
-
-                                agentTasks.add(
-                                        new AgentTask(
-                                                p.title,
-                                                stage,
-                                                t,
-                                                a
-                                        )
-                                );
-
-                                db.addAgentTask(
-                                        p.title,
-                                        stage,
-                                        t,
-                                        a
-                                );
-
-                                showPipelineDetail(p);
-                            }
-                        }
-                )
-                .setNegativeButton(
-                        "Отмена",
-                        null
-                )
-                .show();
-    }
-
-
-    void showTasksForPipeline(
-            final PipelineJob p
-    ) {
-
-        base("tasks");
-
-        content.addView(
-                title("Задачи агентов")
-        );
-
-
-        boolean any = false;
-
-
-        for (final AgentTask t : agentTasks) {
-
-            if (t.pipeline.equals(p.title)) {
-
-                any = true;
-
-
-                TextView tv =
-                        card(
-                                t.stage,
-                                t.task +
-                                        "\nАгент: " +
-                                        t.agent +
-                                        "\nСтатус: " +
-                                        t.status
-                        );
-
-
-                tv.setOnClickListener(
-                        v -> editAgentTask(t, p)
-                );
-
-
-                content.addView(tv);
-            }
-        }
-
-
-        if (!any) {
-
-            content.addView(
-                    card(
-                            "Задач пока нет",
-                            "Нажмите на этап конвейера, чтобы создать задачу."
-                    )
-            );
-        }
-    }
-
-
-    void editAgentTask(
-            final AgentTask t,
-            final PipelineJob p
-    ) {
-
-        String[] statuses = {
-                "Ожидает",
-                "В работе",
-                "На проверке",
-                "Доработка",
-                "Принято",
-                "Отклонено"
-        };
-
-
-        int selected =
-                Math.max(
-                        0,
-                        Arrays.asList(
-                                statuses
-                        ).indexOf(
-                                t.status
-                        )
-                );
-
-
-        new AlertDialog.Builder(this)
-                .setTitle(t.task)
-                .setSingleChoiceItems(
-                        statuses,
-                        selected,
-                        (d, w) -> {
-
-                            t.status =
-                                    statuses[w];
-
-                            db.updateAgentTaskStatus(
-                                    t.task,
-                                    t.status
-                            );
-
-                            d.dismiss();
-
-                            showTasksForPipeline(p);
-                        }
-                )
-                .setNegativeButton(
-                        "Отмена",
-                        null
-                )
-                .show();
-    }
-
-
-    void planPipeline(
-            final PipelineJob p
-    ) {
-
-        LinearLayout box =
-                new LinearLayout(this);
-
-        box.setOrientation(
-                LinearLayout.VERTICAL
-        );
-
-        box.setPadding(
-                30,
-                0,
-                30,
-                0
-        );
-
-
-        EditText sections =
-                new EditText(this);
-
-        sections.setHint(
-                "Количество основных разделов"
-        );
-
-
-        EditText pages =
-                new EditText(this);
-
-        pages.setHint(
-                "Страниц на раздел"
-        );
-
-
-        EditText words =
-                new EditText(this);
-
-        words.setHint(
-                "Ориентир слов на страницу"
-        );
-
-
-        box.addView(sections);
-        box.addView(pages);
-        box.addView(words);
-
-
-        new AlertDialog.Builder(this)
-                .setTitle(
-                        "Планирование научного объёма"
-                )
-                .setView(box)
-                .setPositiveButton(
-                        "Сформировать",
-                        (d, w) -> {
-
-                            int n = 1;
-
-                            try {
-                                n = Integer.parseInt(
-                                        sections.getText()
-                                                .toString()
-                                );
-                            } catch (Exception ignored) {
-                            }
-
-
-                            int pg = 1;
-
-                            try {
-                                pg = Integer.parseInt(
-                                        pages.getText()
-                                                .toString()
-                                );
-                            } catch (Exception ignored) {
-                            }
-
-
-                            int wp = 300;
-
-                            try {
-                                wp = Integer.parseInt(
-                                        words.getText()
-                                                .toString()
-                                );
-                            } catch (Exception ignored) {
-                            }
-
-
-                            for (
-                                    int i = 1;
-                                    i <= n;
-                                    i++
-                            ) {
-
-                                String sectionTitle =
-                                        "Раздел " + i;
-
-
-                                ResearchSection rs =
-                                        new ResearchSection(
-                                                p.title,
-                                                sectionTitle,
-                                                String.valueOf(pg),
-                                                String.valueOf(
-                                                        pg * wp
-                                                ),
-                                                "Подобрать автоматически"
-                                        );
-
-
-                                researchSections.add(rs);
-
-
-                                db.addSection(
-                                        p.title,
-                                        sectionTitle,
-                                        String.valueOf(pg),
-                                        String.valueOf(pg * wp),
-                                        "Подобрать автоматически"
-                                );
-                            }
-
-
-                            showPlan(p);
-                        }
-                )
-                .setNegativeButton(
-                        "Отмена",
-                        null
-                )
-                .show();
-    }
-
-
-    void showPlan(
-            final PipelineJob p
-    ) {
-
-        base("research_plan");
-
-        content.addView(
-                title("План исследования")
-        );
-
-
-        int totalPages = 0;
-        int totalWords = 0;
-        int count = 0;
-
-
-        for (ResearchSection r : researchSections) {
-
-            if (r.pipeline.equals(p.title)) {
-
-                count++;
-
-
-                try {
-                    totalPages +=
-                            Integer.parseInt(r.pages);
-                } catch (Exception ignored) {
-                }
-
-
-                try {
-                    totalWords +=
-                            Integer.parseInt(r.words);
-                } catch (Exception ignored) {
-                }
-
-
-                content.addView(
-                        card(
-                                r.title,
-                                "Объём: " +
-                                        r.pages +
-                                        " стр. / " +
-                                        r.words +
-                                        " слов\nАгент: " +
-                                        r.agent
-                        )
-                );
-            }
-        }
-
-
-        content.addView(
-                card(
-                        "Итого",
-                        "Разделов: " +
-                                count +
-                                "\nПлановый объём: " +
-                                totalPages +
-                                " страниц\nОриентир: " +
-                                totalWords +
-                                " слов"
-                )
-        );
-
-
-        content.addView(
-                nav(
-                        "＋ Добавить раздел",
-                        () -> addSection(p)
-                )
-        );
-    }
-
-
-    void addSection(
-            final PipelineJob p
-    ) {
-
-        LinearLayout box =
-                new LinearLayout(this);
-
-        box.setOrientation(
-                LinearLayout.VERTICAL
-        );
-
-        box.setPadding(
-                30,
-                0,
-                30,
-                0
-        );
-
-
-        EditText t =
-                new EditText(this);
-
-        t.setHint(
-                "Название раздела"
-        );
-
-
-        EditText pg =
-                new EditText(this);
-
-        pg.setHint(
-                "Страницы"
-        );
-
-
-        EditText w =
-                new EditText(this);
-
-        w.setHint(
-                "Слова"
-        );
-
-
-        EditText a =
-                new EditText(this);
-
-        a.setHint(
-                "Агент / подобрать автоматически"
-        );
-
-
-        box.addView(t);
-        box.addView(pg);
-        box.addView(w);
-        box.addView(a);
-
-
-        new AlertDialog.Builder(this)
-                .setTitle(
-                        "Раздел исследования"
-                )
-                .setView(box)
-                .setPositiveButton(
-                        "Добавить",
-                        (d, x) -> {
-
-                            String title =
-                                    t.getText()
-                                            .toString()
-                                            .trim();
-
-                            if (!title.isEmpty()) {
-
-                                ResearchSection r =
-                                        new ResearchSection(
-                                                p.title,
-                                                title,
-                                                pg.getText()
-                                                        .toString(),
-                                                w.getText()
-                                                        .toString(),
-                                                a.getText()
-                                                        .toString()
-                                        );
-
-
-                                researchSections.add(r);
-
-
-                                db.addSection(
-                                        p.title,
-                                        r.title,
-                                        r.pages,
-                                        r.words,
-                                        r.agent
-                                );
-
-
-                                showPlan(p);
-                            }
-                        }
-                )
-                .setNegativeButton(
-                        "Отмена",
-                        null
-                )
-                .show();
-    }
-
-
-    void showPipelineDetail(
-            final PipelineJob p
-    ) {
-
-        base("pipeline_detail");
-
-        content.addView(
-                title("Научный конвейер")
-        );
-
-
-        content.addView(
-                card(
-                        p.title,
-                        "Тип продукции: " +
-                                p.type +
-                                "\nОбщий статус: " +
-                                p.status
-                )
-        );
-
-
-        content.addView(
-                card(
-                        "Техническое задание ректора",
-                        "Объём: " +
-                                p.pages +
-                                " страниц\n" +
-                                "Требования: " +
-                                p.standard +
-                                "\nСрок: " +
-                                p.deadline +
-                                "\nОбласть: " +
-                                p.field +
-                                "\nWeb Research: " +
-                                p.webResearch +
-                                "\nРецензирование: " +
-                                p.reviewers
-                )
-        );
-
-
-        String[] stages = {
-                "1. Декомпозиция задачи",
-                "2. Подбор научной группы",
-                "3. Web Research",
-                "4. Анализ документов",
-                "5. Исследовательская работа",
-                "6. Критическая проверка",
-                "7. Рецензирование",
-                "8. Научное редактирование",
-                "9. Формирование продукции"
-        };
-
-
-        for (final String st : stages) {
-
-            TextView sv =
-                    card(
-                            st,
-                            "Статус этапа: ожидает выполнения\nРезультат: пока отсутствует"
-                    );
-
-
-            sv.setOnClickListener(
-                    v -> addTaskForStage(
-                            p,
-                            st
-                    )
-            );
-
-
-            content.addView(sv);
-        }
-
-
-        content.addView(
-                nav(
-                        "📐 План объёма и структуры",
-                        () -> planPipeline(p)
-                )
-        );
-
-
-        content.addView(
-                nav(
-                        "📋 Задачи агентов",
-                        () -> showTasksForPipeline(p)
-                )
-        );
-
-
-        content.addView(
-                nav(
-                        "▶ Перевести в работу",
-                        () -> {
-
-                            p.status =
-                                    "В работе";
-
-                            db.updatePipelineStatus(
-                                    p.title,
-                                    p.status
-                            );
-
-                            showPipelineDetail(p);
-                        }
-                )
-        );
-
-
-        content.addView(
-                nav(
-                        "⏸ Приостановить",
-                        () -> {
-
-                            p.status =
-                                    "Приостановлено";
-
-                            db.updatePipelineStatus(
-                                    p.title,
-                                    p.status
-                            );
-
-                            showPipelineDetail(p);
-                        }
-                )
-        );
-
-
-        content.addView(
-                nav(
-                        "✓ Отметить как завершённый",
-                        () -> {
-
-                            p.status =
-                                    "Завершено";
-
-                            db.updatePipelineStatus(
-                                    p.title,
-                                    p.status
-                            );
-
-                            showPipelineDetail(p);
-                        }
-                )
-        );
-    }
-
-
-    void addPipeline() {
-
-        LinearLayout box =
-                new LinearLayout(this);
-
-        box.setOrientation(
-                LinearLayout.VERTICAL
-        );
-
-        box.setPadding(
-                30,
-                0,
-                30,
-                0
-        );
-
-
-        EditText title =
-                new EditText(this);
-
-        title.setHint(
-                "Название исследования / поручения"
-        );
-
-
-        Spinner type =
-                new Spinner(this);
-
-
-        String[] types = {
-                "НИР",
-                "Научная статья",
-                "Обзорная справка",
-                "Аналитическая справка",
-                "Обзор литературы",
-                "Доклад",
-                "Монография",
-                "Диссертационное исследование",
-                "Методические материалы",
-                "Технический отчёт",
-                "Другое"
-        };
-
-
-        type.setAdapter(
-                new ArrayAdapter<String>(
-                        this,
-                        android.R.layout.simple_spinner_dropdown_item,
-                        types
-                )
-        );
-
-
-        EditText pages =
-                new EditText(this);
-
-        pages.setHint(
-                "Требуемый объём, страниц"
-        );
-
-
-        EditText standard =
-                new EditText(this);
-
-        standard.setHint(
-                "Требования: ВАК / ГОСТ / журнал / организация"
-        );
-
-
-        EditText deadline =
-                new EditText(this);
-
-        deadline.setHint(
-                "Срок выполнения"
-        );
-
-
-        EditText field =
-                new EditText(this);
-
-        field.setHint(
-                "Научная область / кафедра"
-        );
-
-
-        EditText web =
-                new EditText(this);
-
-        web.setHint(
-                "Web Research: да/нет"
-        );
-
-
-        EditText reviewers =
-                new EditText(this);
-
-        reviewers.setHint(
-                "Критика/рецензирование: да/нет; число рецензентов"
-        );
-
-
-        box.addView(title);
-        box.addView(type);
-        box.addView(pages);
-        box.addView(standard);
-        box.addView(deadline);
-        box.addView(field);
-        box.addView(web);
-        box.addView(reviewers);
-
-
-        new AlertDialog.Builder(this)
-                .setTitle(
-                        "Ректорское научное поручение"
-                )
-                .setView(box)
-                .setPositiveButton(
-                        "Создать конвейер",
-                        (d, w) -> {
-
-                            String t =
-                                    title.getText()
-                                            .toString()
-                                            .trim();
-
-
-                            if (!t.isEmpty()) {
-
-                                PipelineJob p =
-                                        new PipelineJob(
-                                                t,
-                                                type.getSelectedItem()
-                                                        .toString(),
-                                                pages.getText()
-                                                        .toString(),
-                                                standard.getText()
-                                                        .toString(),
-                                                deadline.getText()
-                                                        .toString(),
-                                                field.getText()
-                                                        .toString(),
-                                                web.getText()
-                                                        .toString(),
-                                                reviewers.getText()
-                                                        .toString()
-                                        );
-
-
-                                pipelineJobs.add(p);
-
-
-                                db.addPipeline(
-                                        t,
-                                        p.type,
-                                        p.pages,
-                                        p.standard,
-                                        p.deadline,
-                                        p.field,
-                                        p.webResearch,
-                                        p.reviewers
-                                );
-
-
-                                showPipelines();
-                            }
-                        }
-                )
-                .setNegativeButton(
-                        "Отмена",
-                        null
-                )
-                .show();
-    }
-
-
-    // =========================================================
+    // ============================================================
     // WEB RESEARCH
-    // =========================================================
+    // ============================================================
 
     void showResearch() {
 
         base("research");
 
         content.addView(
-                title("Web Research")
+                text(
+                        "Web Research",
+                        28,
+                        NAVY,
+                        true
+                )
         );
-
 
         content.addView(
                 card(
                         "Исследовательский режим",
-                        "Ректор задаёт тему и область поиска. В серверном/локальном AI-слое агент сможет работать с веб-источниками."
+                        "Ректор задаёт тему, ограничения, период и тип источников. В дальнейшем локальный/серверный исследователь будет собирать доказательную базу."
                 )
         );
-
 
         for (ResearchJob j : researchJobs) {
 
@@ -2968,59 +2659,37 @@ public class MainActivity extends Activity {
                     card(
                             j.topic,
                             "Область: " +
-                                    j.scope +
-                                    "\nСтатус: " +
-                                    j.status
+                            j.scope +
+                            "\nСтатус: " +
+                            j.status
                     )
             );
         }
 
-
         content.addView(
-                nav(
-                        "＋ Новое интернет-исследование",
+                rowAction(
+                        "＋",
+                        "Новое исследование",
+                        "Задать тему и параметры поиска",
                         this::addResearch
                 )
         );
     }
 
-
     void addResearch() {
 
-        LinearLayout box =
-                new LinearLayout(this);
-
-        box.setOrientation(
-                LinearLayout.VERTICAL
-        );
-
-        box.setPadding(
-                30,
-                0,
-                30,
-                0
-        );
-
+        LinearLayout box = dialogBox();
 
         EditText t =
-                new EditText(this);
-
-        t.setHint(
-                "Тема исследования"
-        );
-
+                field("Тема исследования");
 
         EditText scope =
-                new EditText(this);
-
-        scope.setHint(
-                "Что искать / ограничения / период / источники"
-        );
-
+                field(
+                        "Что искать / ограничения / период / источники"
+                );
 
         box.addView(t);
         box.addView(scope);
-
 
         new AlertDialog.Builder(this)
                 .setTitle("Web Research")
@@ -3034,133 +2703,90 @@ public class MainActivity extends Activity {
                                             .toString()
                                             .trim();
 
-
                             if (!topic.isEmpty()) {
 
-                                String s =
-                                        scope.getText()
-                                                .toString();
-
-
-                                researchJobs.add(
+                                ResearchJob r =
                                         new ResearchJob(
                                                 topic,
-                                                s
-                                        )
-                                );
+                                                scope.getText()
+                                                        .toString()
+                                        );
 
+                                researchJobs.add(r);
 
                                 db.addResearch(
-                                        topic,
-                                        s
+                                        r.topic,
+                                        r.scope
                                 );
-
 
                                 showResearch();
                             }
                         }
                 )
-                .setNegativeButton(
-                        "Отмена",
-                        null
-                )
+                .setNegativeButton("Отмена", null)
                 .show();
     }
 
-
-    // =========================================================
+    // ============================================================
     // ИСТОЧНИКИ
-    // =========================================================
+    // ============================================================
 
     void showSources() {
 
         base("sources");
 
         content.addView(
-                title("Источники и интернет")
-        );
-
-
-        content.addView(
-                card(
-                        "Web Research",
-                        "Агент сможет искать интернет-источники, сохранять библиографию и связывать утверждения с источниками."
+                text(
+                        "Источники знаний",
+                        28,
+                        NAVY,
+                        true
                 )
         );
 
-
-        for (Source x : sources) {
+        for (Source s : sources) {
 
             content.addView(
                     card(
-                            x.title,
-                            x.kind +
-                                    "\n" +
-                                    x.url
+                            s.title,
+                            s.kind +
+                            "\n" +
+                            s.url
                     )
             );
         }
 
-
         content.addView(
-                nav(
-                        "＋ Добавить источник",
+                rowAction(
+                        "＋",
+                        "Добавить источник",
+                        "URL, PDF, DOCX или нормативный документ",
                         this::addSource
                 )
         );
     }
 
-
     void addSource() {
 
-        LinearLayout box =
-                new LinearLayout(this);
-
-        box.setOrientation(
-                LinearLayout.VERTICAL
-        );
-
-        box.setPadding(
-                30,
-                0,
-                30,
-                0
-        );
-
+        LinearLayout box = dialogBox();
 
         EditText t =
-                new EditText(this);
-
-        t.setHint(
-                "Название источника"
-        );
-
+                field("Название источника");
 
         EditText u =
-                new EditText(this);
-
-        u.setHint(
-                "URL или имя файла"
-        );
-
+                field("URL или имя файла");
 
         EditText k =
-                new EditText(this);
-
-        k.setHint(
-                "Тип: интернет / PDF / DOCX / нормативный документ"
-        );
-
+                field(
+                        "Тип: интернет / PDF / DOCX / нормативный документ"
+                );
 
         box.addView(t);
         box.addView(u);
         box.addView(k);
 
-
         new AlertDialog.Builder(this)
-                .setTitle(
-                        "Источник знаний"
-                )
+                .setTitle("Источник знаний")
                 .setView(box)
                 .setPositiveButton(
                         "Сохранить",
@@ -3171,111 +2797,184 @@ public class MainActivity extends Activity {
                                             .toString()
                                             .trim();
 
-
                             if (!title.isEmpty()) {
 
-                                String url =
-                                        u.getText()
-                                                .toString();
-
-                                String kind =
-                                        k.getText()
-                                                .toString();
-
-
-                                sources.add(
+                                Source s =
                                         new Source(
                                                 title,
-                                                url,
-                                                kind
-                                        )
-                                );
+                                                u.getText().toString(),
+                                                k.getText().toString()
+                                        );
 
+                                sources.add(s);
 
                                 db.addSource(
-                                        title,
-                                        url,
-                                        kind
+                                        s.title,
+                                        s.url,
+                                        s.kind
                                 );
-
 
                                 showSources();
                             }
                         }
                 )
-                .setNegativeButton(
-                        "Отмена",
-                        null
-                )
+                .setNegativeButton("Отмена", null)
                 .show();
     }
 
+    // ============================================================
+    // СОРЕВНОВАНИЯ
+    // ============================================================
 
-    // =========================================================
-    // ЛОКАЛЬНЫЙ QWEN3 8B
-    // =========================================================
+    void showCompetitions() {
+
+        base("competitions");
+
+        content.addView(
+                text(
+                        "Соревнования агентов",
+                        28,
+                        NAVY,
+                        true
+                )
+        );
+
+        content.addView(
+                card(
+                        "Научное соревнование",
+                        "Одинаковая задача передаётся нескольким агентам. Результаты сравниваются и проходят независимое рецензирование."
+                )
+        );
+
+        for (Competition c :
+                competitions) {
+
+            content.addView(
+                    card(
+                            c.title,
+                            "Задача: " +
+                            c.task +
+                            "\nУчастники: " +
+                            c.participants +
+                            "\nСтатус: " +
+                            c.status
+                    )
+            );
+        }
+
+        content.addView(
+                rowAction(
+                        "＋",
+                        "Новое соревнование",
+                        "Сравнить результаты научных агентов",
+                        this::addCompetition
+                )
+        );
+    }
+
+    void addCompetition() {
+
+        LinearLayout box = dialogBox();
+
+        EditText t =
+                field("Название соревнования");
+
+        EditText task =
+                field("Одинаковая научная задача");
+
+        EditText p =
+                field(
+                        "Участники: агенты через запятую"
+                );
+
+        box.addView(t);
+        box.addView(task);
+        box.addView(p);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Соревнование агентов")
+                .setView(box)
+                .setPositiveButton(
+                        "Создать",
+                        (d, w) -> {
+
+                            String title =
+                                    t.getText()
+                                            .toString()
+                                            .trim();
+
+                            if (!title.isEmpty()) {
+
+                                Competition c =
+                                        new Competition(
+                                                title,
+                                                task.getText().toString(),
+                                                p.getText().toString()
+                                        );
+
+                                competitions.add(c);
+
+                                db.addCompetition(
+                                        c.title,
+                                        c.task,
+                                        c.participants
+                                );
+
+                                showCompetitions();
+                            }
+                        }
+                )
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    // ============================================================
+    // ЛОКАЛЬНЫЙ QWEN
+    // ============================================================
 
     void testLocalQwen() {
 
         final EditText input =
-                new EditText(this);
-
-        input.setHint(
-                "Например: что такое искусственный интеллект?"
-        );
-
+                field(
+                        "Например: составь план научной статьи по ИИ"
+                );
 
         new AlertDialog.Builder(this)
-                .setTitle(
-                        "Тест локального Qwen3 8B"
-                )
+                .setTitle("Локальный Qwen3 8B")
                 .setView(input)
                 .setPositiveButton(
                         "Отправить",
-                        (dialog, which) -> {
+                        (d, w) -> {
 
                             String prompt =
                                     input.getText()
                                             .toString()
                                             .trim();
 
-
                             if (prompt.isEmpty()) {
-
-                                info(
-                                        "Qwen",
-                                        "Введите вопрос."
-                                );
-
                                 return;
                             }
-
 
                             final ProgressDialog pd =
                                     new ProgressDialog(this);
 
                             pd.setMessage(
-                                    "Локальный Qwen думает...\n" +
-                                    "На телефоне генерация может занимать до нескольких минут."
+                                    "Локальный Qwen думает..."
                             );
 
                             pd.setCancelable(false);
-
                             pd.show();
-
 
                             new Thread(() -> {
 
-                                final String result =
+                                String result =
                                         callLocalQwen(prompt);
-
 
                                 runOnUiThread(() -> {
 
                                     if (pd.isShowing()) {
                                         pd.dismiss();
                                     }
-
 
                                     new AlertDialog.Builder(this)
                                             .setTitle(
@@ -3299,169 +2998,117 @@ public class MainActivity extends Activity {
                 .show();
     }
 
+    String callLocalQwen(String prompt) {
 
-    String callLocalQwen(
-            String prompt
-    ) {
+        String urlString =
+                "http://127.0.0.1:8080/v1/chat/completions";
 
         HttpURLConnection conn = null;
-
 
         try {
 
             URL url =
-                    new URL(
-                            LOCAL_QWEN_URL
-                    );
-
+                    new URL(urlString);
 
             conn =
                     (HttpURLConnection)
                             url.openConnection();
 
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(120000);
 
-            conn.setRequestMethod(
-                    "POST"
-            );
-
-
-            conn.setConnectTimeout(
-                    CONNECT_TIMEOUT_MS
-            );
-
-
-            conn.setReadTimeout(
-                    READ_TIMEOUT_MS
-            );
-
-
-            conn.setDoOutput(true);
-
-            conn.setDoInput(true);
-
+            conn.setRequestMethod("POST");
 
             conn.setRequestProperty(
                     "Content-Type",
-                    "application/json; charset=utf-8"
-            );
-
-
-            conn.setRequestProperty(
-                    "Accept",
                     "application/json"
             );
 
+            conn.setDoOutput(true);
 
-            String safePrompt =
-                    jsonEscape(prompt);
-
+            String safe =
+                    escapeJson(prompt);
 
             String json =
                     "{"
-                            + "\"model\":\"Qwen3-8B-Q4_K_M.gguf\","
-                            + "\"messages\":["
-                            + "{"
-                            + "\"role\":\"user\","
-                            + "\"content\":\""
-                            + safePrompt
-                            + "\""
-                            + "}"
-                            + "],"
-                            + "\"max_tokens\":256,"
-                            + "\"temperature\":0.2,"
-                            + "\"chat_template_kwargs\":"
-                            + "{\"enable_thinking\":false}"
-                            + "}";
-
+                    + "\"model\":\"Qwen3-8B-Q4_K_M.gguf\","
+                    + "\"messages\":["
+                    + "{"
+                    + "\"role\":\"user\","
+                    + "\"content\":\""
+                    + safe
+                    + "\""
+                    + "}"
+                    + "],"
+                    + "\"temperature\":0.7,"
+                    + "\"max_tokens\":4096"
+                    + "}";
 
             OutputStream os =
                     conn.getOutputStream();
-
 
             os.write(
                     json.getBytes("UTF-8")
             );
 
-
             os.flush();
             os.close();
-
 
             int code =
                     conn.getResponseCode();
 
-
             InputStream stream;
 
-
             if (code >= 200 && code < 300) {
-
                 stream =
                         conn.getInputStream();
-
             } else {
-
                 stream =
                         conn.getErrorStream();
             }
 
-
             String response =
                     readStream(stream);
 
-
             if (code < 200 || code >= 300) {
 
-                return "Ошибка HTTP " +
-                        code +
-                        ":\n\n" +
-                        response;
+                return "Ошибка локального Qwen.\n\n"
+                        + "HTTP "
+                        + code
+                        + "\n\n"
+                        + response;
             }
 
+            String result =
+                    extractJsonContent(response);
 
-            String text =
-                    extractJsonString(
-                            response,
-                            "\"content\":"
-                    );
+            if (result == null ||
+                    result.trim().isEmpty()) {
 
-
-            if (
-                    text != null
-                            &&
-                    !text.trim().isEmpty()
-            ) {
-
-                return text;
+                return response;
             }
 
+            return result;
 
-            return response;
-
-        } catch (
-                java.net.SocketTimeoutException e
-        ) {
+        } catch (java.net.ConnectException e) {
 
             return
-                    "Локальный Qwen отвечает слишком долго.\n\n" +
-                    "Это НЕ означает, что модель сломана.\n\n" +
-                    "Увеличен таймаут приложения до 120 секунд.\n" +
-                    "Если модель всё ещё генерирует ответ, повторите тест с коротким вопросом.";
+                    "Не удалось подключиться к Qwen.\n\n"
+                    + "Проверьте, что локальный сервер запущен "
+                    + "на 127.0.0.1:8080.";
 
-        } catch (
-                java.net.ConnectException e
-        ) {
+        } catch (java.net.SocketTimeoutException e) {
 
             return
-                    "Не удалось подключиться к Qwen.\n\n" +
-                    "Проверьте, что llama-server запущен в Termux на:\n" +
-                    "127.0.0.1:8080";
+                    "Qwen отвечает слишком долго.\n\n"
+                    + "Модель работает, но генерация ещё не успела завершиться. "
+                    + "Для первого теста используйте короткий запрос.";
 
         } catch (Exception e) {
 
             return
-                    "Ошибка локального Qwen:\n\n" +
-                    e.toString();
+                    "Ошибка локального Qwen:\n"
+                    + e.toString();
 
         } finally {
 
@@ -3471,17 +3118,14 @@ public class MainActivity extends Activity {
         }
     }
 
-
-    String readStream(
-            InputStream stream
-    ) throws Exception {
+    String readStream(InputStream stream)
+            throws Exception {
 
         if (stream == null) {
             return "";
         }
 
-
-        BufferedReader reader =
+        BufferedReader br =
                 new BufferedReader(
                         new InputStreamReader(
                                 stream,
@@ -3489,38 +3133,25 @@ public class MainActivity extends Activity {
                         )
                 );
 
-
-        StringBuilder out =
+        StringBuilder sb =
                 new StringBuilder();
-
 
         String line;
 
-
-        while (
-                (line = reader.readLine())
-                        != null
-        ) {
-
-            out.append(line);
+        while ((line = br.readLine()) != null) {
+            sb.append(line);
         }
 
+        br.close();
 
-        reader.close();
-
-
-        return out.toString();
+        return sb.toString();
     }
 
-
-    String jsonEscape(
-            String s
-    ) {
+    String escapeJson(String s) {
 
         if (s == null) {
             return "";
         }
-
 
         return s
                 .replace("\\", "\\\\")
@@ -3530,67 +3161,31 @@ public class MainActivity extends Activity {
                 .replace("\t", "\\t");
     }
 
+    String extractJsonContent(String json) {
 
-    String extractJsonString(
-            String json,
-            String marker
-    ) {
-
-        int index =
-                json.indexOf(marker);
-
-
-        if (index < 0) {
-            return null;
-        }
-
+        String marker =
+                "\"content\":\"";
 
         int start =
-                index +
-                        marker.length();
+                json.indexOf(marker);
 
-
-        while (
-                start < json.length()
-                        &&
-                Character.isWhitespace(
-                        json.charAt(start)
-                )
-        ) {
-
-            start++;
-        }
-
-
-        if (
-                start >= json.length()
-                        ||
-                json.charAt(start) != '"'
-        ) {
-
+        if (start < 0) {
             return null;
         }
 
-
-        start++;
-
+        start += marker.length();
 
         StringBuilder out =
                 new StringBuilder();
 
-
         boolean escaped = false;
 
-
-        for (
-                int i = start;
-                i < json.length();
-                i++
-        ) {
+        for (int i = start;
+             i < json.length();
+             i++) {
 
             char ch =
                     json.charAt(i);
-
 
             if (escaped) {
 
@@ -3616,15 +3211,10 @@ public class MainActivity extends Activity {
                         out.append('\\');
                         break;
 
-                    case '/':
-                        out.append('/');
-                        break;
-
                     default:
                         out.append(ch);
                         break;
                 }
-
 
                 escaped = false;
 
@@ -3634,7 +3224,7 @@ public class MainActivity extends Activity {
 
             } else if (ch == '"') {
 
-                return out.toString();
+                break;
 
             } else {
 
@@ -3642,68 +3232,56 @@ public class MainActivity extends Activity {
             }
         }
 
-
-        return null;
+        return out.toString();
     }
 
+    // ============================================================
+    // НАСТРОЙКИ ИИ
+    // ============================================================
 
-    // =========================================================
-    // GEMINI
-    // =========================================================
-
-    void testGemini() {
-
-        final EditText input =
-                new EditText(this);
-
-        input.setHint(
-                "Введите запрос для Gemini..."
-        );
-
+    void aiSettings() {
 
         LinearLayout box =
-                new LinearLayout(this);
+                dialogBox();
 
-        box.setOrientation(
-                LinearLayout.VERTICAL
+        EditText key =
+                field(
+                        "Gemini API key (не хранится в коде)"
+                );
+
+        key.setInputType(
+                android.text.InputType.TYPE_CLASS_TEXT |
+                android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
         );
 
-        box.setPadding(
-                20,
-                0,
-                20,
-                0
+        key.setText(
+                prefs.getString(
+                        "gemini_key",
+                        ""
+                )
         );
 
-
-        box.addView(input);
-
+        box.addView(key);
 
         new AlertDialog.Builder(this)
-                .setTitle(
-                        "Тест Gemini API"
-                )
-                .setMessage(
-                        "Ключ Gemini не хранится в коде. " +
-                        "Введите новый ключ, который вы создали после отзыва старого."
-                )
+                .setTitle("Настройки ИИ")
                 .setView(box)
                 .setPositiveButton(
-                        "Отправить",
+                        "Сохранить",
                         (d, w) -> {
 
-                            String prompt =
-                                    input.getText()
-                                            .toString()
-                                            .trim();
+                            prefs.edit()
+                                    .putString(
+                                            "gemini_key",
+                                            key.getText()
+                                                    .toString()
+                                    )
+                                    .apply();
 
-
-                            if (prompt.isEmpty()) {
-                                return;
-                            }
-
-
-                            askGeminiKey(prompt);
+                            info(
+                                    "Сохранено",
+                                    "Ключ Gemini теперь хранится в настройках приложения, а не в исходном коде."
+                            );
                         }
                 )
                 .setNegativeButton(
@@ -3713,77 +3291,79 @@ public class MainActivity extends Activity {
                 .show();
     }
 
+    // ============================================================
+    // GEMINI — БЕЗ КЛЮЧА В ИСХОДНИКЕ
+    // ============================================================
 
-    void askGeminiKey(
-            final String prompt
-    ) {
+    void testGemini() {
 
-        final EditText key =
-                new EditText(this);
-
-        key.setHint(
-                "AIza... / новый ключ Gemini"
-        );
-
-        key.setInputType(
-                android.text.InputType.TYPE_CLASS_TEXT |
-                android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-        );
-
+        final EditText input =
+                field("Введите запрос для Gemini");
 
         new AlertDialog.Builder(this)
-                .setTitle(
-                        "Новый ключ Gemini"
-                )
-                .setView(key)
+                .setTitle("Тест Gemini")
+                .setView(input)
                 .setPositiveButton(
                         "Отправить",
                         (d, w) -> {
 
-                            String apiKey =
-                                    key.getText()
+                            String prompt =
+                                    input.getText()
                                             .toString()
                                             .trim();
 
+                            if (prompt.isEmpty()) {
+                                return;
+                            }
 
-                            if (apiKey.isEmpty()) {
+                            String key =
+                                    prefs.getString(
+                                            "gemini_key",
+                                            ""
+                                    );
 
-                                info(
-                                        "Gemini",
-                                        "Ключ не введён."
-                                );
+                            if (key.isEmpty()) {
+
+                                new AlertDialog.Builder(this)
+                                        .setTitle(
+                                                "Нет ключа Gemini"
+                                        )
+                                        .setMessage(
+                                                "Откройте Настройки ИИ и сохраните новый API-ключ."
+                                        )
+                                        .setPositiveButton(
+                                                "Настройки",
+                                                (x, y) ->
+                                                        aiSettings()
+                                        )
+                                        .setNegativeButton(
+                                                "Отмена",
+                                                null
+                                        )
+                                        .show();
 
                                 return;
                             }
 
-
-                            ProgressDialog pd =
+                            final ProgressDialog pd =
                                     new ProgressDialog(this);
 
-                            pd.setMessage(
-                                    "Gemini отвечает..."
-                            );
-
-                            pd.setCancelable(false);
-
+                            pd.setMessage("Gemini думает...");
                             pd.show();
-
 
                             new Thread(() -> {
 
                                 String result =
                                         callGemini(
                                                 prompt,
-                                                apiKey
+                                                key
                                         );
-
 
                                 runOnUiThread(() -> {
 
                                     if (pd.isShowing()) {
                                         pd.dismiss();
                                     }
-
 
                                     new AlertDialog.Builder(this)
                                             .setTitle(
@@ -3807,7 +3387,6 @@ public class MainActivity extends Activity {
                 .show();
     }
 
-
     String callGemini(
             String prompt,
             String apiKey
@@ -3815,137 +3394,97 @@ public class MainActivity extends Activity {
 
         HttpURLConnection conn = null;
 
-
         try {
 
             String model =
                     "gemini-flash-latest";
 
-
             String urlString =
                     "https://generativelanguage.googleapis.com/v1beta/models/"
-                            +
-                            model
-                            +
-                            ":generateContent";
-
+                    + model
+                    + ":generateContent";
 
             URL url =
                     new URL(urlString);
-
 
             conn =
                     (HttpURLConnection)
                             url.openConnection();
 
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(120000);
 
-            conn.setRequestMethod(
-                    "POST"
-            );
-
-
-            conn.setConnectTimeout(
-                    30000
-            );
-
-
-            conn.setReadTimeout(
-                    120000
-            );
-
+            conn.setRequestMethod("POST");
 
             conn.setRequestProperty(
                     "Content-Type",
                     "application/json"
             );
 
-
             conn.setRequestProperty(
                     "X-goog-api-key",
                     apiKey
             );
 
-
             conn.setDoOutput(true);
 
-
-            String safePrompt =
-                    jsonEscape(prompt);
-
-
             String json =
-                    "{\"contents\":[{\"parts\":[{\"text\":\""
-                            +
-                            safePrompt
-                            +
-                            "\"}]}]}";
-
+                    "{"
+                    + "\"contents\":["
+                    + "{"
+                    + "\"parts\":["
+                    + "{"
+                    + "\"text\":\""
+                    + escapeJson(prompt)
+                    + "\""
+                    + "}"
+                    + "]"
+                    + "}"
+                    + "]"
+                    + "}";
 
             OutputStream os =
                     conn.getOutputStream();
-
 
             os.write(
                     json.getBytes("UTF-8")
             );
 
-
             os.flush();
             os.close();
-
 
             int code =
                     conn.getResponseCode();
 
+            InputStream stream =
+                    code >= 200 && code < 300
+                            ? conn.getInputStream()
+                            : conn.getErrorStream();
 
-            InputStream stream;
-
-
-            if (code >= 200 && code < 300) {
-                stream = conn.getInputStream();
-            } else {
-                stream = conn.getErrorStream();
-            }
-
-
-            String raw =
+            String response =
                     readStream(stream);
-
 
             if (code < 200 || code >= 300) {
 
                 return
-                        "Ошибка HTTP " +
-                        code +
-                        ":\n\n" +
-                        raw;
+                        "HTTP "
+                        + code
+                        + "\n\n"
+                        + response;
             }
-
 
             String result =
-                    extractJsonString(
-                            raw,
-                            "\"text\":"
-                    );
+                    extractJsonText(response);
 
-
-            if (
-                    result != null
-                            &&
-                    !result.isEmpty()
-            ) {
-
-                return result;
-            }
-
-
-            return raw;
+            return result == null
+                    ? response
+                    : result;
 
         } catch (Exception e) {
 
             return
-                    "Ошибка Gemini:\n\n" +
-                    e.toString();
+                    "Ошибка Gemini:\n"
+                    + e.toString();
 
         } finally {
 
@@ -3955,19 +3494,164 @@ public class MainActivity extends Activity {
         }
     }
 
+    String extractJsonText(String json) {
 
-    // =========================================================
-    // INFO
-    // =========================================================
+        String marker =
+                "\"text\":\"";
 
-    void info(
-            String h,
-            String t
+        int start =
+                json.indexOf(marker);
+
+        if (start < 0) {
+            return null;
+        }
+
+        start += marker.length();
+
+        StringBuilder out =
+                new StringBuilder();
+
+        boolean escaped = false;
+
+        for (int i = start;
+             i < json.length();
+             i++) {
+
+            char ch =
+                    json.charAt(i);
+
+            if (escaped) {
+
+                if (ch == 'n') {
+                    out.append('\n');
+                } else if (ch == 'r') {
+                    out.append('\r');
+                } else if (ch == 't') {
+                    out.append('\t');
+                } else if (ch == '"') {
+                    out.append('"');
+                } else if (ch == '\\') {
+                    out.append('\\');
+                } else {
+                    out.append(ch);
+                }
+
+                escaped = false;
+
+            } else if (ch == '\\') {
+
+                escaped = true;
+
+            } else if (ch == '"') {
+
+                break;
+
+            } else {
+
+                out.append(ch);
+            }
+        }
+
+        return out.toString();
+    }
+
+    // ============================================================
+    // ВСПОМОГАТЕЛЬНЫЕ UI
+    // ============================================================
+
+    LinearLayout dialogBox() {
+
+        LinearLayout box =
+                new LinearLayout(this);
+
+        box.setOrientation(
+                LinearLayout.VERTICAL
+        );
+
+        box.setPadding(
+                dp(25),
+                dp(4),
+                dp(25),
+                0
+        );
+
+        return box;
+    }
+
+    EditText field(String hint) {
+
+        EditText e =
+                new EditText(this);
+
+        e.setHint(hint);
+        e.setTextSize(14);
+        e.setTextColor(TEXT);
+        e.setHintTextColor(MUTED);
+        e.setPadding(
+                dp(4),
+                dp(8),
+                dp(4),
+                dp(8)
+        );
+
+        return e;
+    }
+
+    GradientDrawable roundDrawable(
+            int color,
+            int radius
     ) {
 
+        GradientDrawable g =
+                new GradientDrawable();
+
+        g.setColor(color);
+        g.setCornerRadius(dp(radius));
+
+        if (color == CARD) {
+            g.setStroke(
+                    dp(1),
+                    BORDER
+            );
+        }
+
+        return g;
+    }
+
+    GradientDrawable roundGradient(
+            int c1,
+            int c2,
+            int radius
+    ) {
+
+        GradientDrawable g =
+                new GradientDrawable(
+                        GradientDrawable.Orientation.TL_BR,
+                        new int[]{c1, c2}
+                );
+
+        g.setCornerRadius(
+                dp(radius)
+        );
+
+        return g;
+    }
+
+    int dp(int value) {
+
+        return (int)
+                (value *
+                        getResources()
+                                .getDisplayMetrics()
+                                .density +
+                        0.5f);
+    }
+
+    void info(String title, String message) {
+
         new AlertDialog.Builder(this)
-                .setTitle(h)
-                .setMessage(t)
+                .setTitle(title)
+                .setMessage(message)
                 .setPositiveButton(
                         "Понятно",
                         null
@@ -3975,12 +3659,12 @@ public class MainActivity extends Activity {
                 .show();
     }
 
-
-    // =========================================================
+    // ============================================================
     // SQLITE
-    // =========================================================
+    // ============================================================
 
-    static class DB extends SQLiteOpenHelper {
+    static class DB
+            extends SQLiteOpenHelper {
 
         DB(Context c) {
 
@@ -3991,7 +3675,6 @@ public class MainActivity extends Activity {
                     10
             );
         }
-
 
         @Override
         public void onCreate(
@@ -4005,7 +3688,6 @@ public class MainActivity extends Activity {
                     "description TEXT)"
             );
 
-
             d.execSQL(
                     "CREATE TABLE agents(" +
                     "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -4013,7 +3695,6 @@ public class MainActivity extends Activity {
                     "role TEXT," +
                     "department TEXT)"
             );
-
 
             d.execSQL(
                     "CREATE TABLE assignments(" +
@@ -4025,7 +3706,6 @@ public class MainActivity extends Activity {
                     "status TEXT)"
             );
 
-
             d.execSQL(
                     "CREATE TABLE courses(" +
                     "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -4033,7 +3713,6 @@ public class MainActivity extends Activity {
                     "material TEXT," +
                     "status TEXT)"
             );
-
 
             d.execSQL(
                     "CREATE TABLE sources(" +
@@ -4043,7 +3722,6 @@ public class MainActivity extends Activity {
                     "kind TEXT)"
             );
 
-
             d.execSQL(
                     "CREATE TABLE audit(" +
                     "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -4051,14 +3729,12 @@ public class MainActivity extends Activity {
                     "created_at INTEGER)"
             );
 
-
             d.execSQL(
                     "CREATE TABLE agent_profiles(" +
                     "agent_name TEXT PRIMARY KEY," +
                     "qualification TEXT," +
                     "competencies TEXT)"
             );
-
 
             d.execSQL(
                     "CREATE TABLE documents(" +
@@ -4070,7 +3746,6 @@ public class MainActivity extends Activity {
                     "created_at INTEGER)"
             );
 
-
             d.execSQL(
                     "CREATE TABLE research_jobs(" +
                     "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -4080,7 +3755,6 @@ public class MainActivity extends Activity {
                     "created_at INTEGER)"
             );
 
-
             d.execSQL(
                     "CREATE TABLE pipeline_jobs(" +
                     "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -4089,17 +3763,6 @@ public class MainActivity extends Activity {
                     "status TEXT," +
                     "created_at INTEGER)"
             );
-
-
-            d.execSQL(
-                    "CREATE TABLE pipeline_stages(" +
-                    "id INTEGER PRIMARY KEY AUTOINCREMENT," +
-                    "pipeline_title TEXT," +
-                    "stage TEXT," +
-                    "status TEXT," +
-                    "result TEXT)"
-            );
-
 
             d.execSQL(
                     "CREATE TABLE agent_tasks(" +
@@ -4112,7 +3775,6 @@ public class MainActivity extends Activity {
                     "created_at INTEGER)"
             );
 
-
             d.execSQL(
                     "CREATE TABLE competitions(" +
                     "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -4122,7 +3784,6 @@ public class MainActivity extends Activity {
                     "status TEXT," +
                     "created_at INTEGER)"
             );
-
 
             d.execSQL(
                     "CREATE TABLE pipeline_specs(" +
@@ -4137,7 +3798,6 @@ public class MainActivity extends Activity {
                     "reviewers TEXT)"
             );
 
-
             d.execSQL(
                     "CREATE TABLE research_sections(" +
                     "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -4149,7 +3809,6 @@ public class MainActivity extends Activity {
             );
         }
 
-
         @Override
         public void onUpgrade(
                 SQLiteDatabase d,
@@ -4157,19 +3816,15 @@ public class MainActivity extends Activity {
                 int newV
         ) {
 
-            if (oldV < 2) {
-
+            if (oldV < 2)
                 d.execSQL(
                         "CREATE TABLE IF NOT EXISTS agent_profiles(" +
                         "agent_name TEXT PRIMARY KEY," +
                         "qualification TEXT," +
                         "competencies TEXT)"
                 );
-            }
 
-
-            if (oldV < 3) {
-
+            if (oldV < 3)
                 d.execSQL(
                         "CREATE TABLE IF NOT EXISTS documents(" +
                         "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -4179,11 +3834,8 @@ public class MainActivity extends Activity {
                         "linked_to TEXT," +
                         "created_at INTEGER)"
                 );
-            }
 
-
-            if (oldV < 4) {
-
+            if (oldV < 4)
                 d.execSQL(
                         "CREATE TABLE IF NOT EXISTS research_jobs(" +
                         "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -4192,11 +3844,8 @@ public class MainActivity extends Activity {
                         "status TEXT," +
                         "created_at INTEGER)"
                 );
-            }
 
-
-            if (oldV < 5) {
-
+            if (oldV < 5)
                 d.execSQL(
                         "CREATE TABLE IF NOT EXISTS pipeline_jobs(" +
                         "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -4205,24 +3854,8 @@ public class MainActivity extends Activity {
                         "status TEXT," +
                         "created_at INTEGER)"
                 );
-            }
 
-
-            if (oldV < 6) {
-
-                d.execSQL(
-                        "CREATE TABLE IF NOT EXISTS pipeline_stages(" +
-                        "id INTEGER PRIMARY KEY AUTOINCREMENT," +
-                        "pipeline_title TEXT," +
-                        "stage TEXT," +
-                        "status TEXT," +
-                        "result TEXT)"
-                );
-            }
-
-
-            if (oldV < 7) {
-
+            if (oldV < 6)
                 d.execSQL(
                         "CREATE TABLE IF NOT EXISTS agent_tasks(" +
                         "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -4233,11 +3866,8 @@ public class MainActivity extends Activity {
                         "status TEXT," +
                         "created_at INTEGER)"
                 );
-            }
 
-
-            if (oldV < 8) {
-
+            if (oldV < 7)
                 d.execSQL(
                         "CREATE TABLE IF NOT EXISTS competitions(" +
                         "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -4247,11 +3877,8 @@ public class MainActivity extends Activity {
                         "status TEXT," +
                         "created_at INTEGER)"
                 );
-            }
 
-
-            if (oldV < 9) {
-
+            if (oldV < 8)
                 d.execSQL(
                         "CREATE TABLE IF NOT EXISTS pipeline_specs(" +
                         "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -4264,11 +3891,8 @@ public class MainActivity extends Activity {
                         "web_research TEXT," +
                         "reviewers TEXT)"
                 );
-            }
 
-
-            if (oldV < 10) {
-
+            if (oldV < 9)
                 d.execSQL(
                         "CREATE TABLE IF NOT EXISTS research_sections(" +
                         "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -4278,9 +3902,7 @@ public class MainActivity extends Activity {
                         "words TEXT," +
                         "agent TEXT)"
                 );
-            }
         }
-
 
         void log(String action) {
 
@@ -4297,7 +3919,6 @@ public class MainActivity extends Activity {
                     System.currentTimeMillis()
             );
 
-
             getWritableDatabase()
                     .insert(
                             "audit",
@@ -4305,7 +3926,6 @@ public class MainActivity extends Activity {
                             v
                     );
         }
-
 
         void addDepartment(
                 String n,
@@ -4318,7 +3938,6 @@ public class MainActivity extends Activity {
             v.put("name", n);
             v.put("description", d);
 
-
             getWritableDatabase()
                     .insert(
                             "departments",
@@ -4326,12 +3945,8 @@ public class MainActivity extends Activity {
                             v
                     );
 
-
-            log(
-                    "Создана кафедра: " + n
-            );
+            log("Создана кафедра: " + n);
         }
-
 
         void addAgent(
                 String n,
@@ -4346,7 +3961,6 @@ public class MainActivity extends Activity {
             v.put("role", r);
             v.put("department", d);
 
-
             getWritableDatabase()
                     .insert(
                             "agents",
@@ -4354,12 +3968,8 @@ public class MainActivity extends Activity {
                             v
                     );
 
-
-            log(
-                    "Создан агент: " + n
-            );
+            log("Создан агент: " + n);
         }
-
 
         void addAssignment(
                 String t,
@@ -4377,7 +3987,6 @@ public class MainActivity extends Activity {
             v.put("agents", a);
             v.put("status", "Новое");
 
-
             getWritableDatabase()
                     .insert(
                             "assignments",
@@ -4385,12 +3994,11 @@ public class MainActivity extends Activity {
                             v
                     );
 
-
             log(
-                    "Создано научное поручение: " + t
+                    "Создано научное поручение: "
+                    + t
             );
         }
-
 
         void addCourse(
                 String t,
@@ -4404,7 +4012,6 @@ public class MainActivity extends Activity {
             v.put("material", m);
             v.put("status", "Назначен");
 
-
             getWritableDatabase()
                     .insert(
                             "courses",
@@ -4412,12 +4019,8 @@ public class MainActivity extends Activity {
                             v
                     );
 
-
-            log(
-                    "Создан курс: " + t
-            );
+            log("Создан курс: " + t);
         }
-
 
         void saveAgentProfile(
                 String n,
@@ -4428,21 +4031,9 @@ public class MainActivity extends Activity {
             ContentValues v =
                     new ContentValues();
 
-            v.put(
-                    "agent_name",
-                    n
-            );
-
-            v.put(
-                    "qualification",
-                    q
-            );
-
-            v.put(
-                    "competencies",
-                    c
-            );
-
+            v.put("agent_name", n);
+            v.put("qualification", q);
+            v.put("competencies", c);
 
             getWritableDatabase()
                     .insertWithOnConflict(
@@ -4452,12 +4043,40 @@ public class MainActivity extends Activity {
                             SQLiteDatabase.CONFLICT_REPLACE
                     );
 
-
             log(
-                    "Изменён профиль агента: " + n
+                    "Изменён профиль агента: "
+                    + n
             );
         }
 
+        void addDocument(
+                String n,
+                String u,
+                String c,
+                String l
+        ) {
+
+            ContentValues v =
+                    new ContentValues();
+
+            v.put("name", n);
+            v.put("uri", u);
+            v.put("category", c);
+            v.put("linked_to", l);
+            v.put(
+                    "created_at",
+                    System.currentTimeMillis()
+            );
+
+            getWritableDatabase()
+                    .insert(
+                            "documents",
+                            null,
+                            v
+                    );
+
+            log("Загружен документ: " + n);
+        }
 
         void updateDocument(
                 String n,
@@ -4468,16 +4087,8 @@ public class MainActivity extends Activity {
             ContentValues v =
                     new ContentValues();
 
-            v.put(
-                    "category",
-                    c
-            );
-
-            v.put(
-                    "linked_to",
-                    l
-            );
-
+            v.put("category", c);
+            v.put("linked_to", l);
 
             getWritableDatabase()
                     .update(
@@ -4487,231 +4098,40 @@ public class MainActivity extends Activity {
                             new String[]{n}
                     );
 
-
             log(
-                    "Изменён документ: " + n
+                    "Изменён документ: "
+                    + n
             );
         }
 
-
-        void addSection(
-                String p,
+        void addResearch(
                 String t,
-                String pg,
-                String w,
-                String a
+                String sc
         ) {
 
             ContentValues v =
                     new ContentValues();
 
-            v.put(
-                    "pipeline_title",
-                    p
-            );
-
-            v.put(
-                    "section_title",
-                    t
-            );
-
-            v.put(
-                    "pages",
-                    pg
-            );
-
-            v.put(
-                    "words",
-                    w
-            );
-
-            v.put(
-                    "agent",
-                    a
-            );
-
-
-            getWritableDatabase()
-                    .insert(
-                            "research_sections",
-                            null,
-                            v
-                    );
-
-
-            log(
-                    "Добавлен раздел НИР: " + t
-            );
-        }
-
-
-        void addCompetition(
-                String t,
-                String task,
-                String p
-        ) {
-
-            ContentValues v =
-                    new ContentValues();
-
-            v.put(
-                    "title",
-                    t
-            );
-
-            v.put(
-                    "task",
-                    task
-            );
-
-            v.put(
-                    "participants",
-                    p
-            );
-
-            v.put(
-                    "status",
-                    "Подготовлено"
-            );
-
+            v.put("topic", t);
+            v.put("scope", sc);
+            v.put("status", "Подготовлено");
             v.put(
                     "created_at",
                     System.currentTimeMillis()
             );
 
-
             getWritableDatabase()
                     .insert(
-                            "competitions",
+                            "research_jobs",
                             null,
                             v
                     );
 
-
             log(
-                    "Создано соревнование агентов: " + t
+                    "Создан Web Research: "
+                    + t
             );
         }
-
-
-        void updateAgentTaskStatus(
-                String task,
-                String st
-        ) {
-
-            ContentValues v =
-                    new ContentValues();
-
-            v.put(
-                    "status",
-                    st
-            );
-
-
-            getWritableDatabase()
-                    .update(
-                            "agent_tasks",
-                            v,
-                            "task=?",
-                            new String[]{task}
-                    );
-
-
-            log(
-                    "Изменён статус задачи агента: " +
-                            task +
-                            " -> " +
-                            st
-            );
-        }
-
-
-        void addAgentTask(
-                String p,
-                String st,
-                String t,
-                String a
-        ) {
-
-            ContentValues v =
-                    new ContentValues();
-
-            v.put(
-                    "pipeline_title",
-                    p
-            );
-
-            v.put(
-                    "stage",
-                    st
-            );
-
-            v.put(
-                    "task",
-                    t
-            );
-
-            v.put(
-                    "agent",
-                    a
-            );
-
-            v.put(
-                    "status",
-                    "Ожидает"
-            );
-
-            v.put(
-                    "created_at",
-                    System.currentTimeMillis()
-            );
-
-
-            getWritableDatabase()
-                    .insert(
-                            "agent_tasks",
-                            null,
-                            v
-                    );
-
-
-            log(
-                    "Создана задача агента: " + t
-            );
-        }
-
-
-        void updatePipelineStatus(
-                String t,
-                String st
-        ) {
-
-            ContentValues v =
-                    new ContentValues();
-
-            v.put(
-                    "status",
-                    st
-            );
-
-
-            getWritableDatabase()
-                    .update(
-                            "pipeline_jobs",
-                            v,
-                            "title=?",
-                            new String[]{t}
-                    );
-
-
-            log(
-                    "Изменён статус конвейера: " +
-                            t +
-                            " -> " +
-                            st
-            );
-        }
-
 
         void addPipeline(
                 String t,
@@ -4727,26 +4147,13 @@ public class MainActivity extends Activity {
             ContentValues v =
                     new ContentValues();
 
-            v.put(
-                    "title",
-                    t
-            );
-
-            v.put(
-                    "type",
-                    ty
-            );
-
-            v.put(
-                    "status",
-                    "Создано"
-            );
-
+            v.put("title", t);
+            v.put("type", ty);
+            v.put("status", "Создано");
             v.put(
                     "created_at",
                     System.currentTimeMillis()
             );
-
 
             getWritableDatabase()
                     .insert(
@@ -4755,50 +4162,17 @@ public class MainActivity extends Activity {
                             v
                     );
 
-
             ContentValues x =
                     new ContentValues();
 
-            x.put(
-                    "pipeline_title",
-                    t
-            );
-
-            x.put(
-                    "type",
-                    ty
-            );
-
-            x.put(
-                    "pages",
-                    pg
-            );
-
-            x.put(
-                    "standard",
-                    st
-            );
-
-            x.put(
-                    "deadline",
-                    dl
-            );
-
-            x.put(
-                    "field",
-                    f
-            );
-
-            x.put(
-                    "web_research",
-                    wr
-            );
-
-            x.put(
-                    "reviewers",
-                    rv
-            );
-
+            x.put("pipeline_title", t);
+            x.put("type", ty);
+            x.put("pages", pg);
+            x.put("standard", st);
+            x.put("deadline", dl);
+            x.put("field", f);
+            x.put("web_research", wr);
+            x.put("reviewers", rv);
 
             getWritableDatabase()
                     .insertWithOnConflict(
@@ -4808,106 +4182,140 @@ public class MainActivity extends Activity {
                             SQLiteDatabase.CONFLICT_REPLACE
                     );
 
-
             log(
-                    "Создано ректорское научное поручение: " +
-                            t
+                    "Создано ректорское научное поручение: "
+                    + t
             );
         }
 
-
-        void addResearch(
+        void updatePipelineStatus(
                 String t,
-                String sc
+                String st
         ) {
 
             ContentValues v =
                     new ContentValues();
 
-            v.put(
-                    "topic",
-                    t
-            );
-
-            v.put(
-                    "scope",
-                    sc
-            );
-
-            v.put(
-                    "status",
-                    "Подготовлено"
-            );
-
-            v.put(
-                    "created_at",
-                    System.currentTimeMillis()
-            );
-
+            v.put("status", st);
 
             getWritableDatabase()
-                    .insert(
-                            "research_jobs",
-                            null,
-                            v
+                    .update(
+                            "pipeline_jobs",
+                            v,
+                            "title=?",
+                            new String[]{t}
                     );
 
-
             log(
-                    "Создано Web Research: " + t
+                    "Статус конвейера: "
+                    + t
+                    + " -> "
+                    + st
             );
         }
 
-
-        void addDocument(
-                String n,
-                String u,
-                String c,
-                String l
+        void addAgentTask(
+                String p,
+                String st,
+                String t,
+                String a
         ) {
 
             ContentValues v =
                     new ContentValues();
 
-            v.put(
-                    "name",
-                    n
-            );
-
-            v.put(
-                    "uri",
-                    u
-            );
-
-            v.put(
-                    "category",
-                    c
-            );
-
-            v.put(
-                    "linked_to",
-                    l
-            );
-
+            v.put("pipeline_title", p);
+            v.put("stage", st);
+            v.put("task", t);
+            v.put("agent", a);
+            v.put("status", "Ожидает");
             v.put(
                     "created_at",
                     System.currentTimeMillis()
             );
 
-
             getWritableDatabase()
                     .insert(
-                            "documents",
+                            "agent_tasks",
                             null,
                             v
                     );
 
-
             log(
-                    "Загружен документ: " + n
+                    "Создана задача агента: "
+                    + t
             );
         }
 
+        void updateAgentTaskStatus(
+                String task,
+                String status
+        ) {
+
+            ContentValues v =
+                    new ContentValues();
+
+            v.put("status", status);
+
+            getWritableDatabase()
+                    .update(
+                            "agent_tasks",
+                            v,
+                            "task=?",
+                            new String[]{task}
+                    );
+        }
+
+        void addSection(
+                String p,
+                String t,
+                String pg,
+                String w,
+                String a
+        ) {
+
+            ContentValues v =
+                    new ContentValues();
+
+            v.put("pipeline_title", p);
+            v.put("section_title", t);
+            v.put("pages", pg);
+            v.put("words", w);
+            v.put("agent", a);
+
+            getWritableDatabase()
+                    .insert(
+                            "research_sections",
+                            null,
+                            v
+                    );
+        }
+
+        void addCompetition(
+                String t,
+                String task,
+                String p
+        ) {
+
+            ContentValues v =
+                    new ContentValues();
+
+            v.put("title", t);
+            v.put("task", task);
+            v.put("participants", p);
+            v.put("status", "Подготовлено");
+            v.put(
+                    "created_at",
+                    System.currentTimeMillis()
+            );
+
+            getWritableDatabase()
+                    .insert(
+                            "competitions",
+                            null,
+                            v
+                    );
+        }
 
         void addSource(
                 String t,
@@ -4918,21 +4326,9 @@ public class MainActivity extends Activity {
             ContentValues v =
                     new ContentValues();
 
-            v.put(
-                    "title",
-                    t
-            );
-
-            v.put(
-                    "url",
-                    u
-            );
-
-            v.put(
-                    "kind",
-                    k
-            );
-
+            v.put("title", t);
+            v.put("url", u);
+            v.put("kind", k);
 
             getWritableDatabase()
                     .insert(
@@ -4940,11 +4336,6 @@ public class MainActivity extends Activity {
                             null,
                             v
                     );
-
-
-            log(
-                    "Добавлен источник: " + t
-            );
         }
     }
 }
