@@ -2238,6 +2238,9 @@ public class MainActivity extends Activity {
                 (HttpURLConnection)
                         url.openConnection();
 
+connection.setConnectTimeout(15000);
+connection.setReadTimeout(300000);
+
         // --------------------------------------------------------
         // ВАЖНО:
         // локальный Qwen может генерировать долго.
